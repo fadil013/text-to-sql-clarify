@@ -1,0 +1,46 @@
+# Business glossary. If a term is defined here, the system must NOT ask the user to clarify it.
+# Terms deliberately ABSENT (so they trigger clarification): "best customer", "top customers"
+# (count), "recently", "large order", "high value", "loyal".
+
+terms:
+  revenue:
+    definition: >
+      Money received: SUM(payments.amount_cents) where payments.status = 'succeeded',
+      minus SUM(refunds.amount_cents). Cancelled orders never count. Reported per currency.
+  net revenue:
+    definition: Same as revenue (succeeded payments minus refunds).
+  gross revenue:
+    definition: SUM(payments.amount_cents) for succeeded payments, before refunds.
+  order:
+    definition: A row in orders. A "completed order" has status IN ('paid','shipped','delivered').
+  completed order:
+    definition: orders.status IN ('paid','shipped','delivered'); excludes 'pending' and 'cancelled'.
+  customer:
+    definition: A row in customers with is_test_account = FALSE.
+  new customer:
+    definition: A customer whose created_at falls in the requested period. Test accounts excluded.
+  signed up:
+    definition: Same as new customer (customers.created_at).
+  active customer:
+    definition: A customer with at least 1 completed order in the last 90 days.
+  paying customer:
+    definition: A customer with at least 1 succeeded payment.
+  churned subscriber:
+    definition: A subscription with status = 'cancelled'.
+  active subscriber:
+    definition: A subscription with status = 'active'.
+  mrr:
+    definition: SUM(monthly_price_cents) over subscriptions with status = 'active' (USD).
+  average order value:
+    definition: Average of orders.total_cents over completed orders, per currency, ignoring NULL totals.
+  aov:
+    definition: Same as average order value.
+  refund rate:
+    definition: Refunded cents divided by succeeded payment cents, per currency.
+
+time_conventions:
+  last month: The previous full calendar month (e.g. on 2026-09-29, 2026-08-01 up to but excluding 2026-09-01).
+  this month: From the first day of the current calendar month to now.
+  last week: The previous full ISO calendar week (Mon-Sun).
+  last N days: The N days ending now.
+  timezone: UTC.

@@ -1,0 +1,106 @@
+# Schema documentation fed into prompts. Every column in the DB must appear here
+# (enforced by tests/test_db_integration.py). `pii: true` columns are not readable by the app role.
+# All money is INTEGER CENTS in the row's own currency. Divide by 100 for display.
+
+tables:
+  customers:
+    description: One row per customer account. Includes a few near-duplicate people and test accounts.
+    relationships: ["orders.customer_id -> customers.id", "subscriptions.customer_id -> customers.id"]
+    gotchas:
+      - "Some people appear twice with a tweaked name/email (duplicate-ish accounts); they are separate rows."
+      - "is_test_account = TRUE rows are internal QA accounts; exclude them from business metrics."
+      - "country is NULL for ~5% of customers."
+    columns:
+      id: {description: Primary key.}
+      full_name: {description: "Customer display name. Inconsistent casing/format for duplicates.", sample: ["Jane Doe", "J. DOE"]}
+      email: {description: Email address., pii: true}
+      phone: {description: Phone number, often NULL., pii: true}
+      country: {description: "ISO 3166-1 alpha-2 code, NULL for some.", sample: ["US", "GB", "DE"]}
+      marketing_opt_in: {description: Whether the customer agreed to marketing emails.}
+      is_test_account: {description: TRUE for internal QA accounts.}
+      created_at: {description: Signup timestamp (timestamptz). Use this for 'signed up' questions.}
+
+  products:
+    description: Product catalog.
+    relationships: ["order_items.product_id -> products.id"]
+    gotchas:
+      - "price_cents is the CURRENT list price; historical sale price is order_items.unit_price_cents."
+      - "is_active = FALSE means discontinued, but old orders still reference the product."
+    columns:
+      id: {description: Primary key.}
+      name: {description: Product name.}
+      category: {description: "Product category.", sample: ["Electronics", "Home", "Fitness", "Office", "Software"]}
+      price_cents: {description: Current list price in USD cents.}
+      is_active: {description: Whether the product is still sold.}
+
+  orders:
+    description: One row per order placed by a customer.
+    relationships: ["orders.customer_id -> customers.id", "order_items.order_id -> orders.id", "payments.order_id -> orders.id"]
+    gotchas:
+      - "Cancelled orders must NOT count as revenue or as completed orders."
+      - "total_cents is NULL on ~2% of legacy orders; fall back to SUM(order_items.quantity * unit_price_cents)."
+      - "Amounts are in the order's own currency (USD/EUR/GBP). No FX table exists; never sum across currencies without saying so."
+      - "Actual money received is in payments (status='succeeded') minus refunds, not orders.total_cents."
+    columns:
+      id: {description: Primary key.}
+      customer_id: {description: FK to customers.id.}
+      status: {description: "Order lifecycle state.", sample: ["pending", "paid", "shipped", "delivered", "cancelled"]}
+      currency: {description: "Currency of all amounts on this order.", sample: ["USD", "EUR", "GBP"]}
+      total_cents: {description: Order total in cents; may be NULL for legacy orders.}
+      created_at: {description: When the order was placed (timestamptz).}
+
+  order_items:
+    description: Line items of an order.
+    relationships: ["order_items.order_id -> orders.id", "order_items.product_id -> products.id"]
+    gotchas:
+      - "Line revenue = quantity * unit_price_cents."
+    columns:
+      id: {description: Primary key.}
+      order_id: {description: FK to orders.id.}
+      product_id: {description: FK to products.id.}
+      quantity: {description: Units purchased (>0).}
+      unit_price_cents: {description: Price per unit at time of sale, in the order's currency cents.}
+
+  payments:
+    description: Payment attempts for orders. An order can have a failed attempt and then a succeeded one.
+    relationships: ["payments.order_id -> orders.id", "refunds.payment_id -> payments.id"]
+    gotchas:
+      - "Only status='succeeded' payments are money received. failed/pending are not revenue."
+      - "paid_at is NULL unless status='succeeded'."
+    columns:
+      id: {description: Primary key.}
+      order_id: {description: FK to orders.id.}
+      amount_cents: {description: Attempted amount in cents, in the order's currency.}
+      method: {description: Payment method., sample: ["card", "paypal", "bank_transfer"]}
+      status: {description: Payment state., sample: ["succeeded", "failed", "pending"]}
+      card_last4: {description: Last 4 card digits., pii: true}
+      paid_at: {description: When the payment succeeded (timestamptz); NULL otherwise.}
+
+  refunds:
+    description: Refunds issued against payments; can be partial.
+    relationships: ["refunds.payment_id -> payments.id"]
+    gotchas:
+      - "Net revenue = succeeded payments minus refunds. A refund can be less than the payment."
+      - "refunds has no order_id; join refunds -> payments -> orders."
+    columns:
+      id: {description: Primary key.}
+      payment_id: {description: FK to payments.id.}
+      amount_cents: {description: Refunded amount in cents (>0).}
+      reason: {description: Free-text-ish reason; may be NULL., sample: ["damaged", "changed mind"]}
+      created_at: {description: When the refund was issued (timestamptz).}
+
+  subscriptions:
+    description: Recurring plans (SaaS side). A customer may have zero or one subscription row.
+    relationships: ["subscriptions.customer_id -> customers.id"]
+    gotchas:
+      - "Subscription revenue is monthly_price_cents (USD) per month while active; it is NOT in payments/orders."
+      - "cancelled_at is set only when status='cancelled'."
+      - "'Churned' = status='cancelled'."
+    columns:
+      id: {description: Primary key.}
+      customer_id: {description: FK to customers.id.}
+      plan: {description: Plan tier., sample: ["basic", "pro", "enterprise"]}
+      status: {description: Subscription state., sample: ["active", "past_due", "cancelled"]}
+      monthly_price_cents: {description: Monthly price in USD cents.}
+      started_at: {description: Subscription start (timestamptz).}
+      cancelled_at: {description: Cancellation time; NULL unless cancelled.}
