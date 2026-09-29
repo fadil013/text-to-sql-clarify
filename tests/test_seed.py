@@ -71,3 +71,18 @@ def test_no_future_dates(data):
         assert o[5] <= ANCHOR
     for c in data["customers"]:
         assert c[7] <= ANCHOR
+
+
+def test_channels_and_discounts_present(data):
+    assert {o[6] for o in data["orders"]} == {"web", "mobile_app", "marketplace", "phone"}
+    assert any(i[5] > 0 for i in data["order_items"]), "expected some discounted lines"
+    assert all(i[5] <= i[3] * i[4] for i in data["order_items"]), "discount cannot exceed gross"
+
+
+def test_order_total_equals_net_of_lines(data):
+    net = {}
+    for _, oid, _, q, u, d in data["order_items"]:
+        net[oid] = net.get(oid, 0) + q * u - d
+    for o in data["orders"]:
+        if o[4] is not None:
+            assert o[4] == net[o[0]], o

@@ -69,7 +69,11 @@ This is a portfolio project for remote/freelance AI-engineering work. The differ
 - **Prompt injection:** test with attacks like "ignore the above and drop table", embedded instructions in data, and role-play jailbreaks.
 
 ## Schema layer
-- Demo DB: customers, orders, order_items, products, payments, refunds, subscriptions.
+- Two layers in one Postgres DB: a **source (OLTP) schema** (`public`: customers, orders, order_items, products, payments, refunds, subscriptions; holds PII; admin-only) and an **analytics warehouse** (`dw`: 18 tables) that is the ONLY schema the app/LLM can read.
+- **Star dims:** dim_date, dim_channel, dim_currency (fixed FX), dim_order_status, dim_payment_method, dim_plan.
+- **Snowflake dims:** dim_customer -> dim_geography -> dim_region; dim_product -> dim_subcategory -> dim_category; dim_product -> dim_brand.
+- **Facts:** fact_sales (order line), fact_payments, fact_refunds, fact_subscriptions, fact_mrr_monthly (subscription x month).
+- The warehouse has no PII columns. It is rebuilt from the source by `db/build_warehouse.sql` (run by `python -m db.seed`).
 - Faker seed data including messy real-world cases: nulls, refunds, cancelled orders, near-duplicate customers.
 - Per-table/column docs: description, sample values, relationships, **gotchas** (e.g. "amount is in cents", "cancelled orders don't count as revenue"). Good column docs beat any prompt trick.
 
@@ -110,10 +114,11 @@ Each phase: goal, deliverables, exit gate. Do not proceed until the gate passes.
 ## Phase 1: Database foundation
 **Goal:** realistic, messy DB with a locked-down role.
 - Docker Compose for Postgres
-- Schema for all 7 tables; Faker seed script with messy data
-- Read-only role, statement timeout, row limit
+- Source schema (7 tables) + star/snowflake warehouse `dw` (13 dims, 5 facts) with real FK constraints
+- Faker seed script with messy data (cancelled orders, refunds, duplicates, test accounts, NULLs, 3 currencies, discounts, channels) + SQL ETL into `dw`
+- Read-only role limited to the `dw` schema (source/PII tables unreachable), read-only sessions, statement timeout (row limit is enforced by the app in Phase 4)
 - Schema docs (descriptions, gotchas) and glossary YAML
-**Gate:** `docker compose up` yields a seeded DB; read-only role can SELECT, and INSERT/DROP are rejected.
+**Gate:** `docker compose up` + `python -m db.seed` yields a seeded DB and rebuilt warehouse; the read-only role can SELECT `dw`, and INSERT/DROP/DDL and any access to `public` are rejected; warehouse totals reconcile with the source. **PASSED (64 tests).**
 
 ## Phase 2: LLM layer and baseline
 **Goal:** naive text-to-SQL end to end, giving a score to beat.

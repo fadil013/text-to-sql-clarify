@@ -1,4 +1,4 @@
-"""Deterministic synthetic data for the demo shop, including deliberately messy cases.
+"""Deterministic synthetic data for the source (OLTP) system, then builds the warehouse.
 
 Run:  python -m db.seed            (needs the DB from `docker compose up -d`)
 """
@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import random
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import psycopg
 from faker import Faker
@@ -18,22 +19,50 @@ N_DUPLICATES = 25
 N_TEST_ACCOUNTS = 10
 HISTORY_DAYS = 730
 
-CATEGORIES = {
-    "Electronics": [("Wireless Headphones", 8999), ("USB-C Hub", 3499), ("Smart Watch", 19999),
-                    ("Bluetooth Speaker", 5999), ("Webcam HD", 4999), ("Mechanical Keyboard", 10999)],
-    "Home": [("Desk Lamp", 2999), ("Coffee Grinder", 4599), ("Air Purifier", 12999),
-             ("Throw Blanket", 3999), ("Storage Bins", 2499), ("Wall Clock", 1999)],
-    "Fitness": [("Yoga Mat", 2999), ("Resistance Bands", 1999), ("Water Bottle", 1799),
-                ("Dumbbell Set", 8999), ("Jump Rope", 1299), ("Foam Roller", 2499)],
-    "Office": [("Notebook Pack", 1299), ("Ergonomic Chair", 24999), ("Standing Desk", 39999),
-               ("Monitor Arm", 7999), ("Desk Organizer", 1999), ("Whiteboard", 3499)],
-    "Software": [("Photo Editor License", 5999), ("VPN 1-Year", 4999), ("Antivirus Suite", 3999),
-                 ("Cloud Backup 1TB", 6999), ("Password Manager", 2999), ("Video Editor License", 9999)],
-}
+# (category, subcategory, brand, name, price_cents)
+PRODUCT_CATALOG = [
+    ("Electronics", "Audio", "SoundPeak", "Wireless Headphones", 8999),
+    ("Electronics", "Audio", "SoundPeak", "Bluetooth Speaker", 5999),
+    ("Electronics", "Audio", "Auralux", "Earbuds Pro", 12999),
+    ("Electronics", "Computing", "Nexo", "USB-C Hub", 3499),
+    ("Electronics", "Computing", "Nexo", "Mechanical Keyboard", 10999),
+    ("Electronics", "Computing", "Lumio", "Webcam HD", 4999),
+    ("Electronics", "Wearables", "Auralux", "Smart Watch", 19999),
+    ("Electronics", "Wearables", "Auralux", "Fitness Tracker", 7999),
+    ("Home", "Kitchen", "HomeCraft", "Coffee Grinder", 4599),
+    ("Home", "Kitchen", "HomeCraft", "Air Fryer", 8999),
+    ("Home", "Kitchen", "HomeCraft", "Blender", 5999),
+    ("Home", "Decor", "Lumio", "Desk Lamp", 2999),
+    ("Home", "Decor", "Nordhaus", "Wall Clock", 1999),
+    ("Home", "Decor", "Nordhaus", "Throw Blanket", 3999),
+    ("Home", "Storage", "Nordhaus", "Storage Bins", 2499),
+    ("Home", "Storage", "Nordhaus", "Shoe Rack", 3299),
+    ("Fitness", "Strength", "IronPeak", "Dumbbell Set", 8999),
+    ("Fitness", "Strength", "IronPeak", "Resistance Bands", 1999),
+    ("Fitness", "Strength", "IronPeak", "Kettlebell", 3999),
+    ("Fitness", "Cardio", "FlexFit", "Jump Rope", 1299),
+    ("Fitness", "Cardio", "FlexFit", "Treadmill Mat", 4999),
+    ("Fitness", "Recovery", "FlexFit", "Yoga Mat", 2999),
+    ("Fitness", "Recovery", "FlexFit", "Foam Roller", 2499),
+    ("Fitness", "Recovery", "FlexFit", "Water Bottle", 1799),
+    ("Office", "Furniture", "DeskWorks", "Ergonomic Chair", 24999),
+    ("Office", "Furniture", "DeskWorks", "Standing Desk", 39999),
+    ("Office", "Furniture", "DeskWorks", "Monitor Arm", 7999),
+    ("Office", "Stationery", "PaperCo", "Notebook Pack", 1299),
+    ("Office", "Stationery", "PaperCo", "Whiteboard", 3499),
+    ("Office", "Stationery", "PaperCo", "Desk Organizer", 1999),
+    ("Software", "Security", "Shieldly", "VPN 1-Year", 4999),
+    ("Software", "Security", "Shieldly", "Antivirus Suite", 3999),
+    ("Software", "Security", "Shieldly", "Password Manager", 2999),
+    ("Software", "Creative", "Pixelmill", "Photo Editor License", 5999),
+    ("Software", "Creative", "Pixelmill", "Video Editor License", 9999),
+    ("Software", "Cloud", "Shieldly", "Cloud Backup 1TB", 6999),
+]
 PLANS = {"basic": 900, "pro": 2900, "enterprise": 9900}
 COUNTRIES = ["US"] * 40 + ["GB"] * 12 + ["DE"] * 10 + ["FR"] * 8 + ["CA"] * 8 + ["AU"] * 6 + \
             ["IN"] * 6 + ["BR"] * 4 + ["JP"] * 3 + ["NL"] * 3
 REFUND_REASONS = ["damaged", "not as described", "changed mind", "late delivery", None]
+CHANNELS = ["web", "mobile_app", "marketplace", "phone"]
 
 
 def _dt(anchor: datetime, days_ago: float) -> datetime:
@@ -41,20 +70,16 @@ def _dt(anchor: datetime, days_ago: float) -> datetime:
 
 
 def generate_dataset(anchor: datetime | None = None) -> dict[str, list[tuple]]:
-    """Pure function: same anchor + seed -> identical rows. Rows are tuples in column order."""
+    """Pure function: same anchor + seed -> identical rows. Tuples follow _COLUMNS order."""
     anchor = anchor or datetime.now(timezone.utc).replace(microsecond=0)
     rng = random.Random(SEED)
     fake = Faker("en_US")
     Faker.seed(SEED)
 
     # ---- products
-    products = []
-    pid = 0
-    for cat, items in CATEGORIES.items():
-        for name, price in items:
-            pid += 1
-            products.append((pid, name, cat, price, rng.random() > 0.08))
-    price_of = {p[0]: p[3] for p in products}
+    products = [(i, name, cat, sub, brand, price, rng.random() > 0.08)
+                for i, (cat, sub, brand, name, price) in enumerate(PRODUCT_CATALOG, start=1)]
+    price_of = {p[0]: p[5] for p in products}
 
     # ---- customers
     customers = []
@@ -67,7 +92,7 @@ def generate_dataset(anchor: datetime | None = None) -> dict[str, list[tuple]]:
         customers.append([cid, name, email, phone, country, rng.random() < 0.4, False, created])
 
     # near-duplicate customers: same person, tweaked name/email, signed up later
-    for i in range(N_DUPLICATES):
+    for _ in range(N_DUPLICATES):
         src = customers[rng.randrange(0, N_CUSTOMERS)]
         cid = len(customers) + 1
         first, _, last = src[1].partition(" ")
@@ -86,8 +111,7 @@ def generate_dataset(anchor: datetime | None = None) -> dict[str, list[tuple]]:
     # ---- orders / items / payments / refunds
     orders, items, payments, refunds = [], [], [], []
     oid = iid = payid = rid = 0
-    # heavy-tailed activity: a few whales, many one-timers
-    for c in customers:
+    for c in customers:  # heavy-tailed activity: a few whales, many one-timers
         cid, created = c[0], c[7]
         r = rng.random()
         n_orders = 0 if r < 0.12 else 1 if r < 0.45 else rng.randint(2, 4) if r < 0.85 \
@@ -105,25 +129,28 @@ def generate_dataset(anchor: datetime | None = None) -> dict[str, list[tuple]]:
                 status = "delivered"
             if age_days > 30 and status == "pending":
                 status = "cancelled"
+            channel = rng.choices(CHANNELS, [0.50, 0.30, 0.15, 0.05])[0]
 
             order_lines = []
             for _ in range(rng.choices([1, 2, 3, 4], [0.55, 0.28, 0.12, 0.05])[0]):
                 p = rng.randint(1, len(products))
                 drift = rng.choice([1.0, 1.0, 1.0, 0.9, 1.1])  # price at time of sale differs a bit
-                order_lines.append((p, rng.choices([1, 2, 3], [0.8, 0.15, 0.05])[0],
-                                    int(price_of[p] * drift)))
-            total = sum(q * u for _, q, u in order_lines)
-            for p, q, u in order_lines:
+                q = rng.choices([1, 2, 3], [0.8, 0.15, 0.05])[0]
+                u = int(price_of[p] * drift)
+                d = int(q * u * rng.choice([0.05, 0.10, 0.15, 0.20])) if rng.random() < 0.2 else 0
+                order_lines.append((p, q, u, d))
+            total = sum(q * u - d for _, q, u, d in order_lines)
+            for p, q, u, d in order_lines:
                 iid += 1
-                items.append((iid, oid, p, q, u))
-            orders.append((oid, cid, status, currency, None if rng.random() < 0.02 else total, o_created))
+                items.append((iid, oid, p, q, u, d))
+            orders.append((oid, cid, status, currency, None if rng.random() < 0.02 else total,
+                           o_created, channel))
 
             # payments
             if status == "cancelled":
                 if rng.random() < 0.4:
                     payid += 1
-                    payments.append((payid, oid, total, rng.choice(["card", "paypal"]), "failed",
-                                     None, None))
+                    payments.append((payid, oid, total, rng.choice(["card", "paypal"]), "failed", None, None))
                 continue
             if status == "pending":
                 payid += 1
@@ -142,6 +169,7 @@ def generate_dataset(anchor: datetime | None = None) -> dict[str, list[tuple]]:
                 amount = total if rng.random() < 0.5 else max(1, int(total * rng.uniform(0.2, 0.8)))
                 refunds.append((rid, payid, amount, rng.choice(REFUND_REASONS),
                                 min(anchor, paid_at + timedelta(days=rng.uniform(1, 20)))))
+
     # ---- subscriptions
     subs = []
     sid = 0
@@ -163,31 +191,35 @@ def generate_dataset(anchor: datetime | None = None) -> dict[str, list[tuple]]:
 
 _COLUMNS = {
     "customers": "id, full_name, email, phone, country, marketing_opt_in, is_test_account, created_at",
-    "products": "id, name, category, price_cents, is_active",
-    "orders": "id, customer_id, status, currency, total_cents, created_at",
-    "order_items": "id, order_id, product_id, quantity, unit_price_cents",
+    "products": "id, name, category, subcategory, brand, price_cents, is_active",
+    "orders": "id, customer_id, status, currency, total_cents, created_at, channel",
+    "order_items": "id, order_id, product_id, quantity, unit_price_cents, discount_cents",
     "payments": "id, order_id, amount_cents, method, status, card_last4, paid_at",
     "refunds": "id, payment_id, amount_cents, reason, created_at",
     "subscriptions": "id, customer_id, plan, status, monthly_price_cents, started_at, cancelled_at",
 }
 LOAD_ORDER = ["customers", "products", "orders", "order_items", "payments", "refunds", "subscriptions"]
+WAREHOUSE_SQL = Path(__file__).with_name("build_warehouse.sql")
 
 
 def load(dataset: dict[str, list[tuple]] | None = None) -> dict[str, int]:
+    """Load the source tables, then rebuild the warehouse from them (one transaction)."""
     dataset = dataset or generate_dataset()
     counts = {}
     with psycopg.connect(get_settings().admin_dsn) as conn, conn.cursor() as cur:
-        cur.execute("TRUNCATE " + ", ".join(LOAD_ORDER) + " RESTART IDENTITY CASCADE")
+        cur.execute("TRUNCATE " + ", ".join(f"public.{t}" for t in LOAD_ORDER) + " RESTART IDENTITY CASCADE")
         for table in LOAD_ORDER:
             cols = _COLUMNS[table]
             ph = ", ".join(["%s"] * len(cols.split(",")))
-            cur.executemany(f"INSERT INTO {table} ({cols}) VALUES ({ph})", dataset[table])
+            cur.executemany(f"INSERT INTO public.{table} ({cols}) VALUES ({ph})", dataset[table])
             counts[table] = len(dataset[table])
-            cur.execute(f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), "
-                        f"COALESCE(MAX(id), 1)) FROM {table}")
+            cur.execute(f"SELECT setval(pg_get_serial_sequence('public.{table}', 'id'), "
+                        f"COALESCE(MAX(id), 1)) FROM public.{table}")
+        cur.execute(WAREHOUSE_SQL.read_text(encoding="utf-8"))
     return counts
 
 
 if __name__ == "__main__":
     for table, n in load().items():
         print(f"{table:15s} {n}")
+    print("warehouse (dw schema) rebuilt")

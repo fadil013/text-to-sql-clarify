@@ -1,46 +1,60 @@
-# Business glossary. If a term is defined here, the system must NOT ask the user to clarify it.
-# Terms deliberately ABSENT (so they trigger clarification): "best customer", "top customers"
-# (count), "recently", "large order", "high value", "loyal".
+# Business glossary over the `dw` warehouse. If a term is defined here, the system must NOT ask the user
+# to clarify it. Terms deliberately ABSENT (so they trigger clarification): "best customer",
+# "top customers" (how many?), "recently", "large order", "high value", "loyal", "top product"
+# (by what?), "growth" (over which period?).
 
 terms:
   revenue:
     definition: >
-      Money received: SUM(payments.amount_cents) where payments.status = 'succeeded',
-      minus SUM(refunds.amount_cents). Cancelled orders never count. Reported per currency.
+      Sales revenue = SUM(fact_sales.net_usd_cents) for lines whose order status has is_completed = TRUE
+      (paid/shipped/delivered), in USD, after discounts and BEFORE refunds. Cancelled and pending never count.
   net revenue:
-    definition: Same as revenue (succeeded payments minus refunds).
+    definition: revenue minus SUM(fact_refunds.amount_usd_cents) for the same period.
   gross revenue:
-    definition: SUM(payments.amount_cents) for succeeded payments, before refunds.
+    definition: SUM(fact_sales.gross_cents converted to USD) before discounts for completed orders.
+  cash collected:
+    definition: SUM(fact_payments.amount_usd_cents) WHERE payment_status = 'succeeded' (by payment date).
   order:
-    definition: A row in orders. A "completed order" has status IN ('paid','shipped','delivered').
+    definition: A distinct order_id in fact_sales. A "completed order" has is_completed = TRUE.
   completed order:
-    definition: orders.status IN ('paid','shipped','delivered'); excludes 'pending' and 'cancelled'.
+    definition: Order whose dim_order_status.is_completed = TRUE (paid, shipped, delivered).
   customer:
-    definition: A row in customers with is_test_account = FALSE.
+    definition: A dim_customer row with is_test_account = FALSE.
   new customer:
-    definition: A customer whose created_at falls in the requested period. Test accounts excluded.
+    definition: A customer whose signup date (signup_date_key) falls in the period. Test accounts excluded.
   signed up:
-    definition: Same as new customer (customers.created_at).
+    definition: Same as new customer.
   active customer:
     definition: A customer with at least 1 completed order in the last 90 days.
   paying customer:
-    definition: A customer with at least 1 succeeded payment.
-  churned subscriber:
-    definition: A subscription with status = 'cancelled'.
-  active subscriber:
-    definition: A subscription with status = 'active'.
-  mrr:
-    definition: SUM(monthly_price_cents) over subscriptions with status = 'active' (USD).
+    definition: A customer with at least 1 succeeded payment in fact_payments.
   average order value:
-    definition: Average of orders.total_cents over completed orders, per currency, ignoring NULL totals.
+    definition: Revenue divided by the number of distinct completed orders, in USD.
   aov:
     definition: Same as average order value.
+  discount rate:
+    definition: SUM(discount_cents) divided by SUM(gross_cents) over completed orders.
   refund rate:
-    definition: Refunded cents divided by succeeded payment cents, per currency.
+    definition: Refunded USD cents divided by succeeded payment USD cents.
+  mrr:
+    definition: SUM(fact_mrr_monthly.mrr_cents) for a month (USD). "Current MRR" = the current month.
+  churned subscriber:
+    definition: A fact_subscriptions row with subscription_status = 'cancelled'.
+  active subscriber:
+    definition: A fact_subscriptions row with subscription_status = 'active'.
+  category:
+    definition: dim_category, reached via dim_product -> dim_subcategory -> dim_category.
+  region:
+    definition: dim_region, reached via dim_customer -> dim_geography -> dim_region.
 
 time_conventions:
-  last month: The previous full calendar month (e.g. on 2026-09-29, 2026-08-01 up to but excluding 2026-09-01).
+  last month: The previous full calendar month (e.g. on 2026-09-29 that is 2026-08-01 up to but excluding 2026-09-01).
   this month: From the first day of the current calendar month to now.
   last week: The previous full ISO calendar week (Mon-Sun).
   last N days: The N days ending now.
+  year to date: From January 1 of the current year to now.
   timezone: UTC.
+
+defaults:
+  currency: USD (use *_usd_cents columns unless the user explicitly asks for local currency).
+  exclude_test_accounts: true

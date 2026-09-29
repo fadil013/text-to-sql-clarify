@@ -12,7 +12,7 @@ def _load(name):
 
 def test_schema_docs_structure():
     tables = _load("schema_docs.yaml")["tables"]
-    assert len(tables) == 7
+    assert len(tables) == 18
     for name, spec in tables.items():
         assert spec["description"], name
         assert spec["columns"], name
@@ -26,5 +26,5 @@ def test_glossary_structure():
     for term, spec in g["terms"].items():
         assert spec["definition"].strip(), term
     # terms that must stay undefined so they trigger clarification
-    undefined = {"best customer", "top customers", "recently", "large order", "high value", "loyal"}
+    undefined = {"best customer", "top customers", "recently", "large order", "high value", "loyal", "top product", "growth"}
     assert not undefined & set(g["terms"])
