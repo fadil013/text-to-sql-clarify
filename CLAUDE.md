@@ -11,6 +11,9 @@ Read `progress.md` first: it holds the full plan, principles, phases, gates and 
 - Validator and DB role changes are security-critical: flag them for user review.
 - Update the status checklist in `progress.md` when a phase completes.
 
+## Data model
+Source OLTP tables live in `public` (admin only, has PII). The LLM/app only sees the `dw` star+snowflake warehouse (see `config/schema_docs.yaml`). Rebuild everything: `docker compose down -v; docker compose up -d; python -m db.seed`.
+
 ## Stack
 Python 3.11+, PostgreSQL (Docker Compose), Pydantic v2, sqlglot, psycopg 3, FastAPI, Streamlit, pytest, Faker. Free LLMs only, behind a provider abstraction.
 

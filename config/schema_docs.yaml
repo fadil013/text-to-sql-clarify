@@ -1,106 +1,249 @@
-# Schema documentation fed into prompts. Every column in the DB must appear here
-# (enforced by tests/test_db_integration.py). `pii: true` columns are not readable by the app role.
-# All money is INTEGER CENTS in the row's own currency. Divide by 100 for display.
+# Schema documentation fed into prompts. Covers the `dw` warehouse (the ONLY schema the app can read).
+# Every dw column must appear here (enforced by tests/test_db_integration.py).
+# Money = INTEGER CENTS. `*_cents` is in the row's own currency; `*_usd_cents` is converted to USD
+# with the fixed demo rates in dim_currency. Always prefer *_usd_cents unless the user asks for local currency.
+# The warehouse contains no PII (no email / phone / card data).
+
+schema: dw
+
+model:
+  star_dimensions: [dim_date, dim_channel, dim_currency, dim_order_status, dim_payment_method, dim_plan]
+  snowflake_dimensions:
+    - "dim_customer -> dim_geography -> dim_region"
+    - "dim_product -> dim_subcategory -> dim_category"
+    - "dim_product -> dim_brand"
+  facts: [fact_sales, fact_payments, fact_refunds, fact_subscriptions, fact_mrr_monthly]
+  join_rule: "Join facts to dimensions on the *_key columns. To reach country/region or subcategory/category you must walk the snowflake chain."
 
 tables:
-  customers:
-    description: One row per customer account. Includes a few near-duplicate people and test accounts.
-    relationships: ["orders.customer_id -> customers.id", "subscriptions.customer_id -> customers.id"]
-    gotchas:
-      - "Some people appear twice with a tweaked name/email (duplicate-ish accounts); they are separate rows."
-      - "is_test_account = TRUE rows are internal QA accounts; exclude them from business metrics."
-      - "country is NULL for ~5% of customers."
+  dim_date:
+    kind: dimension
+    description: Calendar table, one row per day (2024-2027). Facts reference it by yyyymmdd integer keys.
+    gotchas: ["Use full_date / year_month for time filters. Facts have several role-playing date keys (see each fact)."]
     columns:
-      id: {description: Primary key.}
-      full_name: {description: "Customer display name. Inconsistent casing/format for duplicates.", sample: ["Jane Doe", "J. DOE"]}
-      email: {description: Email address., pii: true}
-      phone: {description: Phone number, often NULL., pii: true}
-      country: {description: "ISO 3166-1 alpha-2 code, NULL for some.", sample: ["US", "GB", "DE"]}
-      marketing_opt_in: {description: Whether the customer agreed to marketing emails.}
-      is_test_account: {description: TRUE for internal QA accounts.}
-      created_at: {description: Signup timestamp (timestamptz). Use this for 'signed up' questions.}
+      date_key: {description: "yyyymmdd integer, e.g. 20260929."}
+      full_date: {description: The calendar date.}
+      year: {description: Calendar year.}
+      quarter: {description: Calendar quarter 1-4.}
+      month: {description: Month number 1-12.}
+      month_name: {description: English month name., sample: ["January"]}
+      year_month: {description: "'YYYY-MM' text.", sample: ["2026-08"]}
+      week_of_year: {description: ISO week number.}
+      day_of_month: {description: Day of month 1-31.}
+      day_of_week: {description: "ISO 1=Mon..7=Sun."}
+      day_name: {description: English weekday name.}
+      is_weekend: {description: TRUE for Sat/Sun.}
+      is_month_end: {description: TRUE for the last day of a month.}
 
-  products:
+  dim_channel:
+    kind: dimension
+    description: Sales channel an order was placed through.
+    columns:
+      channel_key: {description: Surrogate key.}
+      channel_name: {description: Channel., sample: ["web", "mobile_app", "marketplace", "phone"]}
+      is_online: {description: FALSE only for phone.}
+
+  dim_currency:
+    kind: dimension
+    description: Currencies with fixed demo FX rates to USD.
+    columns:
+      currency_key: {description: Surrogate key.}
+      currency_code: {description: ISO code., sample: ["USD", "EUR", "GBP"]}
+      usd_rate: {description: "1 unit of this currency in USD (fixed demo rate; USD=1.0000)."}
+
+  dim_order_status:
+    kind: dimension
+    description: Order lifecycle states with flags.
+    gotchas: ["is_completed = paid/shipped/delivered. Cancelled and pending orders are NOT completed."]
+    columns:
+      order_status_key: {description: Surrogate key.}
+      order_status: {description: Status., sample: ["pending", "paid", "shipped", "delivered", "cancelled"]}
+      is_completed: {description: TRUE for paid/shipped/delivered.}
+      is_cancelled: {description: TRUE for cancelled.}
+
+  dim_payment_method:
+    kind: dimension
+    description: Payment methods.
+    columns:
+      method_key: {description: Surrogate key.}
+      method_name: {description: Method., sample: ["card", "paypal", "bank_transfer"]}
+      is_instant: {description: FALSE for bank_transfer.}
+
+  dim_plan:
+    kind: dimension
+    description: Subscription plan tiers.
+    columns:
+      plan_key: {description: Surrogate key.}
+      plan_name: {description: Plan., sample: ["basic", "pro", "enterprise"]}
+      tier_rank: {description: "1=basic, 2=pro, 3=enterprise."}
+      list_monthly_price_cents: {description: List monthly price in USD cents.}
+
+  dim_region:
+    kind: dimension
+    snowflake: "outer level of the geography chain"
+    description: World regions (top of customer geography).
+    columns:
+      region_key: {description: Key.}
+      region_name: {description: Region., sample: ["North America", "Western Europe", "Asia Pacific", "Unknown"]}
+      continent: {description: Continent grouping.}
+
+  dim_geography:
+    kind: dimension
+    snowflake: "-> dim_region"
+    description: Countries. Customers with no country map to code 'XX' (Unknown).
+    columns:
+      geography_key: {description: Surrogate key.}
+      country_code: {description: "ISO alpha-2, 'XX' = unknown.", sample: ["US", "GB", "DE"]}
+      country_name: {description: Country name.}
+      region_key: {description: FK to dim_region.}
+
+  dim_customer:
+    kind: dimension
+    snowflake: "-> dim_geography -> dim_region"
+    description: One row per customer account.
+    gotchas:
+      - "Some people appear twice with a tweaked name (duplicate-ish accounts); they are separate rows."
+      - "is_test_account = TRUE are internal QA accounts; exclude them from business metrics."
+      - "Country/region requires joining dim_geography (and dim_region for region)."
+    columns:
+      customer_key: {description: Surrogate key used by all facts.}
+      customer_id: {description: Natural id from the source system.}
+      full_name: {description: "Display name; inconsistent format for duplicates.", sample: ["Jane Doe", "J. DOE"]}
+      geography_key: {description: FK to dim_geography.}
+      signup_date_key: {description: FK to dim_date; the signup day.}
+      marketing_opt_in: {description: Agreed to marketing.}
+      is_test_account: {description: TRUE for QA accounts.}
+
+  dim_category:
+    kind: dimension
+    snowflake: "top of product hierarchy"
+    description: Product categories.
+    columns:
+      category_key: {description: Surrogate key.}
+      category_name: {description: Category., sample: ["Electronics", "Home", "Fitness", "Office", "Software"]}
+
+  dim_subcategory:
+    kind: dimension
+    snowflake: "-> dim_category"
+    description: Product subcategories within a category.
+    columns:
+      subcategory_key: {description: Surrogate key.}
+      subcategory_name: {description: Subcategory., sample: ["Audio", "Kitchen", "Strength"]}
+      category_key: {description: FK to dim_category.}
+
+  dim_brand:
+    kind: dimension
+    description: Product brands. A brand can span several categories.
+    columns:
+      brand_key: {description: Surrogate key.}
+      brand_name: {description: Brand., sample: ["Lumio", "Nordhaus", "FlexFit"]}
+
+  dim_product:
+    kind: dimension
+    snowflake: "-> dim_subcategory -> dim_category ; -> dim_brand"
     description: Product catalog.
-    relationships: ["order_items.product_id -> products.id"]
     gotchas:
-      - "price_cents is the CURRENT list price; historical sale price is order_items.unit_price_cents."
-      - "is_active = FALSE means discontinued, but old orders still reference the product."
+      - "Category needs the chain dim_product -> dim_subcategory -> dim_category."
+      - "list_price_usd_cents is the CURRENT price; the price actually charged is in fact_sales."
+      - "is_active = FALSE means discontinued but it still appears in historical sales."
     columns:
-      id: {description: Primary key.}
-      name: {description: Product name.}
-      category: {description: "Product category.", sample: ["Electronics", "Home", "Fitness", "Office", "Software"]}
-      price_cents: {description: Current list price in USD cents.}
-      is_active: {description: Whether the product is still sold.}
+      product_key: {description: Surrogate key used by fact_sales.}
+      product_id: {description: Natural id from the source system.}
+      product_name: {description: Product name.}
+      subcategory_key: {description: FK to dim_subcategory.}
+      brand_key: {description: FK to dim_brand.}
+      list_price_usd_cents: {description: Current list price, USD cents.}
+      is_active: {description: Still sold.}
 
-  orders:
-    description: One row per order placed by a customer.
-    relationships: ["orders.customer_id -> customers.id", "order_items.order_id -> orders.id", "payments.order_id -> orders.id"]
+  fact_sales:
+    kind: fact
+    grain: "one order line (one product on one order)"
+    description: Sales facts, including cancelled and pending orders. Filter by order status to get real sales.
     gotchas:
-      - "Cancelled orders must NOT count as revenue or as completed orders."
-      - "total_cents is NULL on ~2% of legacy orders; fall back to SUM(order_items.quantity * unit_price_cents)."
-      - "Amounts are in the order's own currency (USD/EUR/GBP). No FX table exists; never sum across currencies without saying so."
-      - "Actual money received is in payments (status='succeeded') minus refunds, not orders.total_cents."
+      - "Cancelled/pending lines are present. For revenue/sales join dim_order_status and use is_completed = TRUE."
+      - "net_usd_cents = (gross - discount) converted to USD. This is the default revenue measure."
+      - "order_id repeats across lines: count DISTINCT order_id to count orders."
+      - "Refunds are NOT netted here; see fact_refunds."
+      - "date_key is the ORDER date, not the payment date."
     columns:
-      id: {description: Primary key.}
-      customer_id: {description: FK to customers.id.}
-      status: {description: "Order lifecycle state.", sample: ["pending", "paid", "shipped", "delivered", "cancelled"]}
-      currency: {description: "Currency of all amounts on this order.", sample: ["USD", "EUR", "GBP"]}
-      total_cents: {description: Order total in cents; may be NULL for legacy orders.}
-      created_at: {description: When the order was placed (timestamptz).}
+      sales_key: {description: Surrogate key.}
+      order_id: {description: Source order id; repeats per line.}
+      order_item_id: {description: Source line id; unique.}
+      date_key: {description: FK to dim_date (order date).}
+      customer_key: {description: FK to dim_customer.}
+      product_key: {description: FK to dim_product.}
+      channel_key: {description: FK to dim_channel.}
+      order_status_key: {description: FK to dim_order_status.}
+      currency_key: {description: FK to dim_currency (currency of the *_cents columns).}
+      quantity: {description: Units.}
+      gross_cents: {description: "quantity * unit price, order currency."}
+      discount_cents: {description: Line discount, order currency.}
+      net_cents: {description: "gross - discount, order currency."}
+      net_usd_cents: {description: net converted to USD cents.}
 
-  order_items:
-    description: Line items of an order.
-    relationships: ["order_items.order_id -> orders.id", "order_items.product_id -> products.id"]
+  fact_payments:
+    kind: fact
+    grain: "one payment attempt"
+    description: Payment attempts (succeeded, failed, pending). An order can have a failed attempt then a succeeded one.
     gotchas:
-      - "Line revenue = quantity * unit_price_cents."
+      - "Cash collected = SUM(amount_usd_cents) WHERE payment_status = 'succeeded'."
+      - "date_key is the paid date for succeeded payments, otherwise the order date."
     columns:
-      id: {description: Primary key.}
-      order_id: {description: FK to orders.id.}
-      product_id: {description: FK to products.id.}
-      quantity: {description: Units purchased (>0).}
-      unit_price_cents: {description: Price per unit at time of sale, in the order's currency cents.}
+      payment_key: {description: Surrogate key.}
+      payment_id: {description: Source payment id.}
+      order_id: {description: Source order id.}
+      date_key: {description: FK to dim_date.}
+      customer_key: {description: FK to dim_customer.}
+      method_key: {description: FK to dim_payment_method.}
+      currency_key: {description: FK to dim_currency.}
+      payment_status: {description: State., sample: ["succeeded", "failed", "pending"]}
+      amount_cents: {description: Amount, order currency.}
+      amount_usd_cents: {description: Amount in USD cents.}
 
-  payments:
-    description: Payment attempts for orders. An order can have a failed attempt and then a succeeded one.
-    relationships: ["payments.order_id -> orders.id", "refunds.payment_id -> payments.id"]
-    gotchas:
-      - "Only status='succeeded' payments are money received. failed/pending are not revenue."
-      - "paid_at is NULL unless status='succeeded'."
+  fact_refunds:
+    kind: fact
+    grain: "one refund"
+    description: Refunds against payments; can be partial.
+    gotchas: ["Net of refunds = subtract SUM(fact_refunds.amount_usd_cents) for the same period/customer."]
     columns:
-      id: {description: Primary key.}
-      order_id: {description: FK to orders.id.}
-      amount_cents: {description: Attempted amount in cents, in the order's currency.}
-      method: {description: Payment method., sample: ["card", "paypal", "bank_transfer"]}
-      status: {description: Payment state., sample: ["succeeded", "failed", "pending"]}
-      card_last4: {description: Last 4 card digits., pii: true}
-      paid_at: {description: When the payment succeeded (timestamptz); NULL otherwise.}
+      refund_key: {description: Surrogate key.}
+      refund_id: {description: Source refund id.}
+      payment_id: {description: Source payment id refunded.}
+      order_id: {description: Source order id.}
+      date_key: {description: FK to dim_date (refund date).}
+      customer_key: {description: FK to dim_customer.}
+      currency_key: {description: FK to dim_currency.}
+      reason: {description: Refund reason; may be NULL., sample: ["damaged", "changed mind"]}
+      amount_cents: {description: Refunded amount, order currency.}
+      amount_usd_cents: {description: Refunded amount in USD cents.}
 
-  refunds:
-    description: Refunds issued against payments; can be partial.
-    relationships: ["refunds.payment_id -> payments.id"]
-    gotchas:
-      - "Net revenue = succeeded payments minus refunds. A refund can be less than the payment."
-      - "refunds has no order_id; join refunds -> payments -> orders."
+  fact_subscriptions:
+    kind: fact
+    grain: "one subscription"
+    description: SaaS subscriptions; at most one per customer in this dataset.
+    gotchas: ["Churned = subscription_status = 'cancelled'. cancel_date_key is NULL unless cancelled."]
     columns:
-      id: {description: Primary key.}
-      payment_id: {description: FK to payments.id.}
-      amount_cents: {description: Refunded amount in cents (>0).}
-      reason: {description: Free-text-ish reason; may be NULL., sample: ["damaged", "changed mind"]}
-      created_at: {description: When the refund was issued (timestamptz).}
-
-  subscriptions:
-    description: Recurring plans (SaaS side). A customer may have zero or one subscription row.
-    relationships: ["subscriptions.customer_id -> customers.id"]
-    gotchas:
-      - "Subscription revenue is monthly_price_cents (USD) per month while active; it is NOT in payments/orders."
-      - "cancelled_at is set only when status='cancelled'."
-      - "'Churned' = status='cancelled'."
-    columns:
-      id: {description: Primary key.}
-      customer_id: {description: FK to customers.id.}
-      plan: {description: Plan tier., sample: ["basic", "pro", "enterprise"]}
-      status: {description: Subscription state., sample: ["active", "past_due", "cancelled"]}
+      subscription_key: {description: Surrogate key.}
+      subscription_id: {description: Source subscription id.}
+      customer_key: {description: FK to dim_customer.}
+      plan_key: {description: FK to dim_plan.}
+      start_date_key: {description: FK to dim_date.}
+      cancel_date_key: {description: FK to dim_date; NULL unless cancelled.}
+      subscription_status: {description: State., sample: ["active", "past_due", "cancelled"]}
       monthly_price_cents: {description: Monthly price in USD cents.}
-      started_at: {description: Subscription start (timestamptz).}
-      cancelled_at: {description: Cancellation time; NULL unless cancelled.}
+      tenure_days: {description: Days from start to cancel (or to today if not cancelled).}
+
+  fact_mrr_monthly:
+    kind: fact
+    grain: "one subscription x one billed calendar month"
+    description: Monthly recurring revenue snapshots for trends (MRR over time, plan mix).
+    gotchas:
+      - "MRR for a month = SUM(mrr_cents) for that month_date_key. Cancelled subscriptions stop the month BEFORE cancellation."
+      - "month_date_key is the first day of the month (join dim_date on it, then use year_month)."
+    columns:
+      mrr_key: {description: Surrogate key.}
+      month_date_key: {description: FK to dim_date; first day of the month.}
+      subscription_id: {description: Source subscription id.}
+      customer_key: {description: FK to dim_customer.}
+      plan_key: {description: FK to dim_plan.}
+      mrr_cents: {description: Monthly recurring revenue, USD cents.}
