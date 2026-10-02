@@ -1,7 +1,8 @@
-"""Phase 2 baseline pipeline: question -> SQL -> execute (read-only) -> plain-English answer.
+"""Baseline pipeline: question -> SQL -> validate (Phase 4) -> execute (read-only) -> answer.
 
-No clarification, no sqlglot validator yet (Phases 4-5). The only safety net right now is the
-read-only DB role from Phase 1: it can only SELECT from `dw`, with a statement timeout.
+No clarification yet (Phase 5). Safety is now layered: the Phase 4 validator (sqlglot-based:
+single SELECT, table/column allowlist, blocked functions/keywords, auto-LIMIT) runs before any
+SQL reaches the database, with the Phase 1 read-only DB role as the backstop underneath it.
 """
 from __future__ import annotations
 
@@ -15,25 +16,19 @@ from app.llm.factory import get_provider
 from app.llm.provider import LLMProvider
 from app.prompts import answer_synthesis_system_prompt, sql_generation_system_prompt
 from app.schemas import FinalAnswer, SQLGeneration
+from app.validator import ValidationError, validate_and_prepare
+
+# Kept as an alias: existing call sites (and earlier phases' tests) catch NotSelectError. The
+# validator now rejects far more than "not a SELECT", but the alias avoids a noisy rename.
+NotSelectError = ValidationError
 
 
-class NotSelectError(ValueError):
-    """Raised when the model returns anything other than a single SELECT. Real validation is Phase 4."""
-
-
-def _guard_select_only(sql: str) -> None:
-    s = sql.strip().rstrip(";").strip()
-    if ";" in s:
-        raise NotSelectError("multiple statements are not allowed")
-    if not s[:6].upper().startswith("SELECT"):
-        raise NotSelectError("only SELECT statements are allowed")
-
-
-def generate_sql(question: str, provider: LLMProvider) -> SQLGeneration:
+def generate_sql(question: str, provider: LLMProvider, settings: Settings | None = None) -> SQLGeneration:
+    settings = settings or get_settings()
     system = sql_generation_system_prompt()
     result = provider.generate_structured(system, f"Question: {question}", SQLGeneration)
-    _guard_select_only(result.sql)
-    return result
+    safe_sql = validate_and_prepare(result.sql, max_rows=settings.max_rows)
+    return result.model_copy(update={"sql": safe_sql})
 
 
 def run_sql(sql: str, settings: Settings) -> list[dict]:
@@ -53,7 +48,7 @@ def answer_question(question: str, provider: LLMProvider | None = None, settings
     settings = settings or get_settings()
     provider = provider or get_provider(settings)
 
-    sql_gen = generate_sql(question, provider)
+    sql_gen = generate_sql(question, provider, settings)
     rows = run_sql(sql_gen.sql, settings)
     answer_text = synthesize_answer(question, sql_gen.sql, rows, provider)
 
