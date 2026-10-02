@@ -8,6 +8,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    llm_provider: str = "gemini"
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.8-flash"
+    groq_api_key: str = ""
+    groq_model: str = "openai/gpt-oss-20b"
+
     postgres_db: str = "shop"
     postgres_host: str = "localhost"
     postgres_port: int = 5432

@@ -122,10 +122,13 @@ Each phase: goal, deliverables, exit gate. Do not proceed until the gate passes.
 
 ## Phase 2: LLM layer and baseline
 **Goal:** naive text-to-SQL end to end, giving a score to beat.
-- Provider abstraction (Ollama / free API via config)
-- Pydantic schemas; versioned prompt files
-- Simple pipeline: question → SQL → execute → answer; CLI
-**Gate:** answers clear questions via CLI.
+- Provider abstraction: `app/llm/` — `GeminiProvider` + `GroqProvider` (both free, REST, no SDK), swapped via `LLM_PROVIDER` in `.env`. Retry-with-backoff on 429/503.
+- Pydantic schemas (`app/schemas.py`): `SQLGeneration`, `FinalAnswer`. Every LLM call is JSON-mode + Pydantic-validated, with one repair retry on bad output.
+- Versioned prompt files: `prompts/sql_generation_v1.txt`, `prompts/answer_synthesis_v1.txt` — schema docs + glossary injected automatically (`app/prompts.py`).
+- Simple pipeline (`app/pipeline.py`): question → `generate_sql()` → bare single-SELECT guard (stopgap; real validator is Phase 4) → execute on the read-only role → `synthesize_answer()`.
+- CLI: `python -m app.cli "question"`.
+- Ollama dropped: LM Studio/Ollama were removed from the machine; Gemini + Groq cover the free-tier need. Mistral investigated and dropped — its free API requires an account upgrade despite docs claiming otherwise.
+**Gate:** answers clear questions via CLI. **PASSED (83/84 tests; the 1 failure is Gemini's real free-tier quota, not a bug — confirmed by Groq passing the identical test).** Verified live: "How many customers signed up last month?" → correct SQL, correct assumptions (excludes test accounts, calendar-month definition), correct answer (22 customers).
 
 ## Phase 3: Eval harness
 **Goal:** measurement before tuning.
@@ -161,7 +164,7 @@ Each phase: goal, deliverables, exit gate. Do not proceed until the gate passes.
 
 ## Phase 8: Interface
 **Goal:** visible clarification flow.
-- FastAPI backend; Streamlit UI with tappable options, SQL and assumptions shown
+- FastAPI backend; **React + TypeScript (Vite) + Tailwind** frontend (changed from the original Streamlit plan — a real chat-style UI supports the clarification back-and-forth with clickable option chips, which Streamlit fights). Shows the answer, a collapsible SQL block, and assumption tags per turn.
 **Gate:** full flow works in the browser.
 
 ## Phase 9: Polish and ship
@@ -186,9 +189,11 @@ README.md
 ```
 
 # Status
-- [x] Phase 0  - [x] Phase 1  - [ ] Phase 2  - [ ] Phase 3  - [ ] Phase 4
+- [x] Phase 0  - [x] Phase 1  - [x] Phase 2  - [ ] Phase 3  - [ ] Phase 4
 - [ ] Phase 5  - [ ] Phase 6  - [ ] Phase 7  - [ ] Phase 8  - [ ] Phase 9
 
 # Open decisions
-- LLM choice: local Ollama vs free API (depends on hardware)
-- Docker Desktop must be running (installed, but the engine was not running when last checked)
+- Resolved: LLM = Gemini (primary) + Groq (secondary/benchmark), both free REST APIs. LM Studio/Ollama removed from the machine; Mistral's free tier turned out to require an account upgrade, so it was dropped.
+- Resolved: Frontend = React + TypeScript (Vite) + Tailwind, not Streamlit (Phase 8).
+- Docker Desktop must be running before `docker compose up` — start it manually if `docker info` fails.
+- Gemini free-tier quota can be exhausted by heavy test/eval runs in a short window; Phase 3's eval harness needs throttling/caching to avoid burning the daily quota.
