@@ -166,11 +166,40 @@ sustained traffic fails completely — not a pacing problem, a daily-quota probl
 `python -m eval.runner --provider gemini` (or `groq`) once quota resets, or with a fresh key, to
 get the recorded baseline number and close this phase.
 
-## Phase 4: Validation and safety layer  *(security-critical)*
+## Phase 4: Validation and safety layer  *(security-critical -- see note below)*
 **Goal:** LLM SQL is never trusted.
-- sqlglot checks, allowlists, PII handling, auto-LIMIT, EXPLAIN dry-run
-- Prompt-injection defenses; adversarial test suite
-**Gate:** 100% of adversarial cases blocked; validator unit tests pass.
+- `app/validator.py`: layered checks before any SQL reaches the DB -- (1) sqlglot parse, exactly
+  one SELECT; (2) explicit table allowlist (every table must be `dw.<known table>`); (3) sqlglot
+  `qualify()` against a real schema dict, rejecting any hallucinated/unknown column; (4) blocked
+  function list (pg_sleep, lo_*, dblink, backend-control, etc.); (5) tokenized keyword blocklist
+  (DROP/DELETE/INSERT/UPDATE/.../DO) as a final net; (6) suspicious-column-name pattern check
+  (email/phone/password/etc.) as defense-in-depth even though `dw` has no such columns today;
+  (7) auto-LIMIT injection/capping.
+- Wired into `app/pipeline.py`: `generate_sql()` now calls `validate_and_prepare()` before any
+  SQL is executed. The Phase 1 read-only DB role remains underneath as the backstop.
+- Two real gaps found and fixed by hand *while building this*, not assumed away: (1) sqlglot's
+  `qualify()` does NOT reject `SELECT * FROM public.customers` on its own (no column to resolve
+  against, so nothing to check) -- confirmed by direct testing before relying on it; the explicit
+  table allowlist is what actually catches this. (2) the function blocklist initially missed
+  `pg_sleep`/`pg_read_file`/`lo_import`/`dblink_connect`/`pg_terminate_backend` entirely because
+  sqlglot's `sql_name()` returns the literal string `"ANONYMOUS"` for unrecognized functions
+  (truthy, so the code's `or` fallback never reached the real name) -- caught by the adversarial
+  test suite actually failing, not by inspection.
+- `tests/test_validator.py`: all 24 real golden-set `gold_sql` queries verified to pass unchanged;
+  36 adversarial raw-SQL payloads (DDL/DML injection, cross-schema access, PII-shaped columns,
+  `information_schema`/`pg_catalog` probing, dangerous functions, comment-based statement
+  injection, case-insensitive schema bypass) verified blocked.
+**Gate:** **PASSED.** 100% block rate on the adversarial suite (`test_block_rate_is_100_percent`);
+66/66 validator tests pass; full suite 175/175 (non-network) pass after wiring.
+**Flagged for your review, per CLAUDE.md's own rule** ("validator and DB role changes are
+security-critical"): this is the actual safety boundary between the LLM and a real database.
+The 36-case test suite is solid but not exhaustive -- real-world SQL injection research is deep,
+and this hasn't had a second pair of eyes. Known, accepted limitations: (a) it trusts sqlglot's
+Postgres parser to be correct (a parser bug could theoretically open a gap); (b) the suspicious-
+column-name check is a substring match, not semantic, so a cleverly-named-but-legitimate column
+could false-positive (acceptable: fails safe, not open); (c) it does not yet do the EXPLAIN
+dry-run the original plan mentioned -- that's a cheap-query-cost check, not a safety control, so
+it was deprioritized in favor of the checks above; can be added without changing the safety model.
 
 ## Phase 5: Clarification engine  *(the differentiator)*
 **Goal:** ask instead of guess.
