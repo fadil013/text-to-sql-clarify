@@ -9,11 +9,13 @@ from pydantic import BaseModel, ValidationError
 
 from app.llm.json_mode import parse_structured, schema_instructions
 from app.llm.provider import LLMError, LLMProvider, T
+from app.llm.rate_limit import RateLimiter
 
 _BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 _RETRY_STATUSES = {429, 503}
 _MAX_SERVER_RETRIES = 3
 _BACKOFF_SECONDS = 2.0
+_MIN_INTERVAL_S = 4.0  # conservative: free-tier Flash limits are tighter and quota is precious
 
 
 class GeminiProvider(LLMProvider):
@@ -25,6 +27,7 @@ class GeminiProvider(LLMProvider):
         self._key = api_key
         self._model = model
         self._client = httpx.Client(timeout=timeout)
+        self._limiter = RateLimiter(_MIN_INTERVAL_S)
 
     def _call(self, system: str, user: str, temperature: float, *, json_mode: bool) -> str:
         url = f"{_BASE}/{self._model}:generateContent?key={self._key}"
@@ -37,6 +40,7 @@ class GeminiProvider(LLMProvider):
             body["generationConfig"]["responseMimeType"] = "application/json"
         resp = None
         for attempt in range(_MAX_SERVER_RETRIES + 1):
+            self._limiter.wait()
             resp = self._client.post(url, json=body)
             if resp.status_code not in _RETRY_STATUSES or attempt == _MAX_SERVER_RETRIES:
                 break

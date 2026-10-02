@@ -24,3 +24,6 @@ SCHEMA: dw (every table below is in this schema; do not prefix with "public")
 - List every table you referenced in tables_used.
 - List every interpretation choice you made (e.g. which metric "best" means, which date range
   "last month" means) in assumptions, even if it came straight from the glossary.
+- All *_cents and *_usd_cents columns are integer cents. ALWAYS divide by 100.0 in the SELECT
+  (e.g. "amount_usd_cents / 100.0 AS amount_usd") before returning a dollar amount. Never return
+  raw cents as if it were dollars.
