@@ -17,3 +17,4 @@ eval/reports/*.tmp
 
 # local data exports
 exports/
+eval/.cache/

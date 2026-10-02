@@ -15,7 +15,8 @@ class Settings(BaseSettings):
     groq_model: str = "openai/gpt-oss-20b"
 
     postgres_db: str = "shop"
-    postgres_host: str = "localhost"
+    postgres_host: str = "127.0.0.1"  # not "localhost": avoids a ~20s IPv6 (::1) timeout on Windows
+    # before falling back to IPv4, since docker-compose binds the port to 127.0.0.1 only.
     postgres_port: int = 5432
     postgres_admin_user: str = "postgres"
     postgres_admin_password: str = Field(default="")

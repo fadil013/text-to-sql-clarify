@@ -9,11 +9,14 @@ from pydantic import ValidationError
 
 from app.llm.json_mode import parse_structured, schema_instructions
 from app.llm.provider import LLMError, LLMProvider, T
+from app.llm.rate_limit import RateLimiter
 
 _URL = "https://api.groq.com/openai/v1/chat/completions"
 _RETRY_STATUSES = {429, 503}
 _MAX_SERVER_RETRIES = 3
 _BACKOFF_SECONDS = 2.0
+_MIN_INTERVAL_S = 6.0  # this account's real limit is tighter than req/min docs suggested
+# (observed 429s even at 2.2s spacing -- likely a tokens/min cap given our ~4-5k token prompts)
 
 
 class GroqProvider(LLMProvider):
@@ -25,6 +28,7 @@ class GroqProvider(LLMProvider):
         self._key = api_key
         self._model = model
         self._client = httpx.Client(timeout=timeout)
+        self._limiter = RateLimiter(_MIN_INTERVAL_S)
 
     def _call(self, system: str, user: str, temperature: float, *, json_mode: bool) -> str:
         body = {
@@ -36,6 +40,7 @@ class GroqProvider(LLMProvider):
             body["response_format"] = {"type": "json_object"}
         resp = None
         for attempt in range(_MAX_SERVER_RETRIES + 1):
+            self._limiter.wait()
             resp = self._client.post(_URL, headers={"Authorization": f"Bearer {self._key}"}, json=body)
             if resp.status_code not in _RETRY_STATUSES or attempt == _MAX_SERVER_RETRIES:
                 break
