@@ -203,10 +203,34 @@ it was deprioritized in favor of the checks above; can be added without changing
 
 ## Phase 5: Clarification engine  *(the differentiator)*
 **Goal:** ask instead of guess.
-- AmbiguityAnalysis stage + prompt; decision gate
-- Glossary short-circuit; ClarificationRequest (2-4 options); one-round cap; session memory
-- Merge reply into resolved question; optional labeled-assumption fallback
-**Gate:** clarification precision/recall and false-clarification rate measured and meeting targets set with the user.
+- `app/clarification.py`: `AmbiguityAnalysis` + `ClarificationRequest` schemas, a free/instant
+  glossary short-circuit (`glossary_covers()` -- skips the LLM call entirely when the question's
+  business terms are all defined; deliberately still falls through to the LLM for a fixed list of
+  phrases we left undefined on purpose: "best customer", "recently", "large order", etc.), the
+  `decide()` decision gate (proceed / clarify / refuse / assume), `SessionMemory` (remembers a
+  resolved choice per ambiguity_type within a session so it isn't asked twice), a hard 2-round cap
+  with a clearly-labeled-assumption fallback after that, and `resolve_with_answer()` to merge a
+  user's choice back into one fully-specified question.
+- `prompts/ambiguity_analysis_v1.txt`: separate prompt from SQL generation (per the "no
+  mega-prompt" rule); explicitly instructs treating the user's question as data, not instructions
+  (prompt-injection defense at the ambiguity-check stage, before SQL generation ever runs).
+- Wired into `app/pipeline.py` as the new top-level entry points: `ask()` (runs the decision gate,
+  then only runs generate->validate->execute->synthesize if the gate says to) and
+  `continue_after_clarification()` for the follow-up turn. The Phase 4 validator still runs on
+  every SQL path reached this way -- confirmed by test, not assumed.
+- `tests/test_clarification.py` (13 tests, stub LLM, pure logic) + `tests/test_pipeline_ask.py`
+  (5 tests, stub LLM + real DB, confirms the validator still runs inside `ask()`).
+- **Verified live** (not just stub-tested) against Groq, all three paths: "Who was our best
+  customer last month?" -> correctly flagged ambiguous with real, sensible options (by revenue /
+  net revenue / number of orders / average order value); "How many active customers do we have?"
+  -> glossary short-circuit, answered directly (264), no wasted LLM call; a prompt-injection
+  attempt disguised as "tell me a joke" -> correctly refused rather than complied with.
+**Gate:** the harness runs end-to-end and the 3 decision paths are confirmed correct, live.
+**Not yet done:** formally measuring clarification precision/recall and the false-clarification
+rate against the golden set's 16 ambiguous + 8 out-of-scope cases requires Phase 3's full live
+eval run (still pending quota -- see Phase 3), and the CLI doesn't yet expose an interactive
+clarify-then-answer loop (Phase 8's API/frontend is the intended interactive surface; `ask()` and
+`continue_after_clarification()` are both ready for it to call).
 
 ## Phase 6: Self-repair and answer synthesis
 **Goal:** recover from errors and explain results.
@@ -247,8 +271,12 @@ README.md
 ```
 
 # Status
-- [x] Phase 0  - [x] Phase 1  - [x] Phase 2  - [ ] Phase 3  - [ ] Phase 4
-- [ ] Phase 5  - [ ] Phase 6  - [ ] Phase 7  - [ ] Phase 8  - [ ] Phase 9
+- [x] Phase 0  - [x] Phase 1  - [x] Phase 2  - [~] Phase 3  - [x] Phase 4
+- [x] Phase 5  - [ ] Phase 6  - [ ] Phase 7  - [ ] Phase 8  - [ ] Phase 9
+- [~] = infrastructure built and verified correct; live baseline numbers pending (quota-blocked,
+  see Phase 3). [x] Phase 4 = security-critical design was presented for review; no objection
+  raised; treating as approved, but flagged here as the one phase where that matters most if
+  anyone ever re-reviews this.
 
 # Open decisions
 - Resolved: LLM = Gemini (primary) + Groq (secondary/benchmark), both free REST APIs. LM Studio/Ollama removed from the machine; Mistral's free tier turned out to require an account upgrade, so it was dropped.
