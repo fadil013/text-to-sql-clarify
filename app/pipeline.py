@@ -11,6 +11,9 @@ import json
 import psycopg
 from psycopg.rows import dict_row
 
+from pydantic import BaseModel
+
+from app.clarification import ClarificationRequest, Decision, SessionMemory, decide
 from app.config import Settings, get_settings
 from app.llm.factory import get_provider
 from app.llm.provider import LLMProvider
@@ -59,3 +62,62 @@ def answer_question(question: str, provider: LLMProvider | None = None, settings
         assumptions=sql_gen.assumptions,
         clarification_involved=False,
     )
+
+
+class AskResult(BaseModel):
+    """What `ask()` returns: exactly one of `answer`, `clarification`, or `refusal_reason` is set,
+    selected by `kind`. This is the one entry point Phase 8's API/frontend should call."""
+    kind: str  # "answer" | "clarify" | "refuse"
+    answer: FinalAnswer | None = None
+    clarification: ClarificationRequest | None = None
+    refusal_reason: str = ""
+
+
+def ask(question: str, provider: LLMProvider | None = None, settings: Settings | None = None,
+        memory: SessionMemory | None = None) -> AskResult:
+    """Phase 5 entry point: runs the clarification decision gate first, then (only if the gate
+    says to) the Phase 2-4 generate -> validate -> execute -> synthesize pipeline."""
+    settings = settings or get_settings()
+    provider = provider or get_provider(settings)
+    memory = memory or SessionMemory()
+
+    decision = decide(question, provider, memory)
+    return _act_on_decision(question, decision, provider, settings)
+
+
+def continue_after_clarification(original_question: str, ambiguity_type: str, user_choice: str,
+                                  provider: LLMProvider | None = None, settings: Settings | None = None,
+                                  memory: SessionMemory | None = None) -> AskResult:
+    """Call after the user answers a ClarificationRequest returned by ask()."""
+    from app.clarification import resolve_with_answer
+
+    settings = settings or get_settings()
+    provider = provider or get_provider(settings)
+    memory = memory or SessionMemory()
+    memory.rounds_this_question += 1
+
+    resolved = resolve_with_answer(original_question, ambiguity_type, user_choice, memory)
+    decision = Decision(kind="proceed", resolved_question=resolved)
+    return _act_on_decision(resolved, decision, provider, settings, clarification_involved=True)
+
+
+def _act_on_decision(question: str, decision: Decision, provider: LLMProvider, settings: Settings,
+                      clarification_involved: bool = False) -> AskResult:
+    if decision.kind == "refuse":
+        return AskResult(kind="refuse", refusal_reason=decision.refusal_reason)
+    if decision.kind == "clarify":
+        return AskResult(kind="clarify", clarification=decision.clarification)
+
+    # "proceed" or "assume": run the Phase 2-4 pipeline on the resolved question
+    sql_gen = generate_sql(decision.resolved_question, provider, settings)
+    rows = run_sql(sql_gen.sql, settings)
+    answer_text = synthesize_answer(question, sql_gen.sql, rows, provider)
+    assumptions = list(sql_gen.assumptions)
+    if decision.kind == "assume" and decision.labeled_assumption:
+        assumptions.append(decision.labeled_assumption)
+
+    final = FinalAnswer(
+        answer=answer_text, sql=sql_gen.sql, rows_preview=rows[:20],
+        assumptions=assumptions, clarification_involved=clarification_involved or decision.kind == "assume",
+    )
+    return AskResult(kind="answer", answer=final)
