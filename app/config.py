@@ -25,6 +25,7 @@ class Settings(BaseSettings):
 
     statement_timeout_ms: int = 5000
     max_rows: int = 1000
+    max_repairs: int = 2  # LLM repair attempts after a failed query (Phase 6); 0 disables repair
 
     def _dsn(self, user: str, password: str) -> str:
         return (

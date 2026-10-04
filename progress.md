@@ -234,9 +234,43 @@ clarify-then-answer loop (Phase 8's API/frontend is the intended interactive sur
 
 ## Phase 6: Self-repair and answer synthesis
 **Goal:** recover from errors and explain results.
-- Feed DB errors back (max 2 retries), then graceful failure
-- Natural-language answer with SQL, assumptions, rows preview
-**Gate:** repair success rate measured; failures handled cleanly.
+- `app/repair.py`: `execute_with_repair()` -- validate -> execute; on a *mechanical* failure
+  (hallucinated column/table, parse error, DB data/type error, statement timeout) the exact error
+  goes back to the model (`prompts/sql_repair_v1.txt`, an addendum on the SQL-generation prompt),
+  max `MAX_REPAIRS` (default 2) attempts, then `RepairFailed`. Every repaired query goes through the
+  Phase 4 validator again. Stops early if the model resubmits a query that already failed.
+- **Not repairable, by design** (re-raised, `ask()` returns `refuse`): validator safety rejections
+  (non-SELECT, multi-statement, blocked function/keyword, off-limits schema, PII-looking name), DB
+  permission errors, connection errors. The validator itself is **unchanged** (repair.py only
+  imports its constant list of sensitive name fragments).
+- Bug found by the tests while building this: the validator reports `SELECT email FROM
+  dw.dim_customer` as an *unknown column* (checked before the PII pattern), so a PII probe looked
+  like a typo and would have been retried. Fixed in repair.py by also checking the failed SQL
+  against the validator's sensitive-name list; pinned by tests against the real validator output.
+- `ask()` / `continue_after_clarification()` now never raise for expected failures: `AskResult.kind`
+  is `answer | clarify | refuse | error` (new `error_message`). Blocked SQL -> `refuse`; exhausted
+  repair / LLM outage / DB error -> `error`. `answer_question()` (baseline path) still raises.
+- Answer synthesis: `prompts/answer_synthesis_v2.txt` (truncation + "first N of M" awareness, empty
+  results, $ formatting, rows-are-data); a failed synthesis call falls back to a deterministic
+  answer instead of discarding a query that already ran. `FinalAnswer` gained `row_count`,
+  `truncated`, `repairs`.
+- CLI: `python -m app.cli "question"` now runs the interactive clarify-then-answer loop
+  (`--baseline` for the no-gate path).
+- **Eval-integrity bugs fixed along the way** (each would have scored correct answers as wrong):
+  (1) `clear_electronics_product_count` had a gold_sql that summed refunds, not products;
+  (2) 7 gold queries on customer-linked facts (refunds, payments, discounts, subscriptions) ignored
+  the glossary's default `exclude_test_accounts`; (3) result comparison treated
+  `Decimal('37597.15')` and `Decimal('37597.150000000000')` as different.
+- `eval/repair_eval.py`: breaks each clear case's gold SQL in one realistic way (unit suffix
+  dropped, `_key`->`_id`, unknown table, syntax error), confirms it really fails, runs repair, and
+  compares the result set to gold. **Groq (gpt-oss-20b): 24/24 = 100% repair success, 0
+  repaired-but-wrong, 1.00 repairs used on average** (`eval/reports/phase6_repair_groq_*.json`).
+  Honest caveats: synthetic faults on one provider, n=24 (hallucinated-column fault only n=1, the
+  fault mix shifted when gold changed), and it measures repair ability, not how often a model
+  makes these mistakes unprompted -- live `repairs` counts in Phase 7 show that.
+**Gate:** **PASSED.** 237 non-LLM tests pass (new: `test_repair.py`, `test_repair_eval.py`,
+`test_cli.py`); repair success rate measured; failures (exhausted repair, unsafe SQL, LLM down,
+synthesis down, truncation) each return a clean result.
 
 ## Phase 7: Tuning, ablation, model benchmark
 **Goal:** the headline numbers.
@@ -272,7 +306,7 @@ README.md
 
 # Status
 - [x] Phase 0  - [x] Phase 1  - [x] Phase 2  - [~] Phase 3  - [x] Phase 4
-- [x] Phase 5  - [ ] Phase 6  - [ ] Phase 7  - [ ] Phase 8  - [ ] Phase 9
+- [x] Phase 5  - [x] Phase 6  - [ ] Phase 7  - [ ] Phase 8  - [ ] Phase 9
 - [~] = infrastructure built and verified correct; live baseline numbers pending (quota-blocked,
   see Phase 3). [x] Phase 4 = security-critical design was presented for review; no objection
   raised; treating as approved, but flagged here as the one phase where that matters most if

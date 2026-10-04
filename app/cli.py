@@ -1,35 +1,93 @@
-"""Command-line entry point for Phase 2's baseline pipeline.
+"""Command-line entry point with the full clarify-then-answer loop.
 
-Usage:  python -m app.cli "How many customers signed up last month?"
+Usage:  python -m app.cli "Who was our best customer last month?"
+        python -m app.cli --baseline "How many products are in the catalog?"   # no clarification gate
 """
 from __future__ import annotations
 
 import sys
+from typing import Callable
 
-from app.llm.provider import LLMError
-from app.pipeline import NotSelectError, answer_question
+from app.clarification import SessionMemory
+from app.config import Settings
+from app.llm.provider import LLMError, LLMProvider
+from app.pipeline import AskResult, ask, continue_after_clarification
+
+
+def _print_answer(result: AskResult, out: Callable[[str], None]) -> None:
+    a = result.answer
+    out(f"SQL:\n  {a.sql}\n")
+    if a.repairs:
+        out(f"(self-repair: recovered after {len(a.repairs)} failed attempt(s))\n")
+    if a.assumptions:
+        out("Assumptions:")
+        for item in a.assumptions:
+            out(f"  - {item}")
+        out("")
+    if a.truncated:
+        out(f"Note: result truncated at {a.row_count} rows.\n")
+    out(f"Answer: {a.answer}")
+
+
+def run_interactive(question: str, provider: LLMProvider | None = None, settings: Settings | None = None,
+                    input_fn: Callable[[str], str] = input, out: Callable[[str], None] = print) -> int:
+    memory = SessionMemory()
+    result = ask(question, provider=provider, settings=settings, memory=memory)
+
+    # ask() may clarify; the engine caps rounds, so this loop is bounded
+    while result.kind == "clarify":
+        c = result.clarification
+        out(c.question)
+        for i, opt in enumerate(c.options, 1):
+            out(f"  {i}. {opt}")
+        if c.allow_free_text:
+            out("  or type your own answer")
+        raw = input_fn("> ").strip()
+        choice = c.options[int(raw) - 1] if raw.isdigit() and 1 <= int(raw) <= len(c.options) else raw
+        if not choice:
+            out("No answer given; stopping.")
+            return 1
+        ambiguity_type = _last_ambiguity_type(memory, c.question)
+        result = continue_after_clarification(question, ambiguity_type, choice,
+                                              provider=provider, settings=settings, memory=memory)
+
+    if result.kind == "answer":
+        _print_answer(result, out)
+        return 0
+    out(f"{'Refused' if result.kind == 'refuse' else 'Error'}: {result.refusal_reason or result.error_message}")
+    return 1
+
+
+def _last_ambiguity_type(memory: SessionMemory, question_text: str) -> str:
+    reverse = {
+        "Which metric should I use?": "metric", "Which time range did you mean?": "time",
+        "Which definition did you mean?": "entity", "Can you narrow the scope?": "scope",
+        "Can you give me a bit more detail?": "missing_param", "Can you clarify what you mean?": "vague_term",
+    }
+    return reverse.get(question_text, "vague_term")
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
-        print('Usage: python -m app.cli "your question"')
+    args = sys.argv[1:]
+    baseline = "--baseline" in args
+    question = " ".join(a for a in args if a != "--baseline")
+    if not question:
+        print('Usage: python -m app.cli [--baseline] "your question"')
         return 1
-    question = " ".join(sys.argv[1:])
-
+    if baseline:
+        from app.pipeline import answer_question
+        try:
+            a = answer_question(question)
+        except Exception as e:  # baseline path raises by design; show it plainly
+            print(f"Could not answer: {e}")
+            return 1
+        _print_answer(AskResult(kind="answer", answer=a), print)
+        return 0
     try:
-        result = answer_question(question)
-    except (LLMError, NotSelectError) as e:
+        return run_interactive(question)
+    except LLMError as e:
         print(f"Could not answer: {e}")
         return 1
-
-    print(f"SQL:\n  {result.sql}\n")
-    if result.assumptions:
-        print("Assumptions:")
-        for a in result.assumptions:
-            print(f"  - {a}")
-        print()
-    print(f"Answer: {result.answer}")
-    return 0
 
 
 if __name__ == "__main__":

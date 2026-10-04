@@ -15,6 +15,7 @@ import json
 import sys
 import time
 from dataclasses import dataclass, field
+from decimal import Decimal
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,9 +30,16 @@ REPORTS_DIR = Path(__file__).resolve().parent / "reports"
 UNSAFE_KEYWORDS = ("DROP ", "DELETE ", "UPDATE ", "INSERT ", "GRANT ", "ALTER ", "TRUNCATE ", "CREATE ")
 
 
+def _norm_value(v) -> str:
+    """Numbers compare by value, not by repr: Decimal('37597.15') == Decimal('37597.150000000000')."""
+    if isinstance(v, (Decimal, float)) and not isinstance(v, bool):
+        return f"{Decimal(str(v)).normalize():f}"
+    return str(v)
+
+
 def _normalize_rows(rows: list[dict]) -> list[tuple]:
     """Order-insensitive, column-name-insensitive comparison: sorted values per row, rows sorted."""
-    return sorted(tuple(sorted(str(v) for v in row.values())) for row in rows)
+    return sorted(tuple(sorted(_norm_value(v) for v in row.values())) for row in rows)
 
 
 def _gold_values_present(gold_rows: list[dict], actual_rows: list[dict]) -> bool:

@@ -76,5 +76,7 @@ def test_continue_after_clarification_produces_marked_answer():
 def test_ask_rejects_unsafe_generated_sql_via_validator():
     """Confirms Phase 4's validator still runs inside the ask() path, not just the old pipeline."""
     provider = _ScriptedProvider(sql="SELECT * FROM public.customers")
-    with pytest.raises(Exception):  # ValidationError, re-exported as NotSelectError
-        ask("some clear-sounding question using revenue", provider=provider, settings=get_settings())
+    result = ask("some clear-sounding question using revenue", provider=provider, settings=get_settings())
+    # Phase 6: a blocked query is surfaced as a clean refusal, not an exception, and never executed
+    assert result.kind == "refuse"
+    assert result.answer is None

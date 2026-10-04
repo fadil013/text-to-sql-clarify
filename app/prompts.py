@@ -47,5 +47,10 @@ def sql_generation_system_prompt() -> str:
     return template.format(schema_docs=_compact_schema_docs(), glossary=_compact_glossary())
 
 
+def sql_repair_system_prompt() -> str:
+    """The full SQL-generation prompt (schema, glossary, rules) plus the repair-mode addendum."""
+    return f"{sql_generation_system_prompt()}\n\n{_read(PROMPTS_DIR / 'sql_repair_v1.txt')}"
+
+
 def answer_synthesis_system_prompt() -> str:
-    return _read(PROMPTS_DIR / "answer_synthesis_v1.txt")
+    return _read(PROMPTS_DIR / "answer_synthesis_v2.txt")
