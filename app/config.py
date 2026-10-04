@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.8-flash"
     groq_api_key: str = ""
     groq_model: str = "openai/gpt-oss-20b"
+    ollama_model: str = "qwen3:8b"  # local; no quota. `ollama pull qwen3:8b`
+    ollama_host: str = "http://127.0.0.1:11434"
 
     postgres_db: str = "shop"
     postgres_host: str = "127.0.0.1"  # not "localhost": avoids a ~20s IPv6 (::1) timeout on Windows

@@ -9,12 +9,13 @@ from pydantic import ValidationError
 
 from app.llm.json_mode import parse_structured, schema_instructions
 from app.llm.provider import LLMError, LLMProvider, T
-from app.llm.rate_limit import RateLimiter
+from app.llm.rate_limit import RateLimiter, estimate_tokens, retry_after_seconds, TokenWindowLimiter
 
 _URL = "https://api.groq.com/openai/v1/chat/completions"
 _RETRY_STATUSES = {429, 503}
-_MAX_SERVER_RETRIES = 3
+_MAX_SERVER_RETRIES = 4
 _BACKOFF_SECONDS = 2.0
+_TOKENS_PER_MIN = 7000  # free tier: 8,000 TPM on openai/gpt-oss-20b (read from x-ratelimit-limit-tokens)
 _MIN_INTERVAL_S = 6.0  # this account's real limit is tighter than req/min docs suggested
 # (observed 429s even at 2.2s spacing -- likely a tokens/min cap given our ~4-5k token prompts)
 
@@ -29,6 +30,7 @@ class GroqProvider(LLMProvider):
         self._model = model
         self._client = httpx.Client(timeout=timeout)
         self._limiter = RateLimiter(_MIN_INTERVAL_S)
+        self._tokens = TokenWindowLimiter(_TOKENS_PER_MIN)
 
     def _call(self, system: str, user: str, temperature: float, *, json_mode: bool) -> str:
         body = {
@@ -39,12 +41,15 @@ class GroqProvider(LLMProvider):
         if json_mode:
             body["response_format"] = {"type": "json_object"}
         resp = None
+        cost = estimate_tokens(system, user)
         for attempt in range(_MAX_SERVER_RETRIES + 1):
             self._limiter.wait()
+            self._tokens.wait(cost)
             resp = self._client.post(_URL, headers={"Authorization": f"Bearer {self._key}"}, json=body)
             if resp.status_code not in _RETRY_STATUSES or attempt == _MAX_SERVER_RETRIES:
                 break
-            time.sleep(_BACKOFF_SECONDS * (2**attempt))  # 2s, 4s, 8s
+            # honor the server's own retry hint (a per-minute limit can't be outwaited in 2-8s)
+            time.sleep(retry_after_seconds(resp, _BACKOFF_SECONDS * (2**attempt)))
         if resp.status_code != 200:
             raise LLMError(f"Groq HTTP {resp.status_code}: {resp.text[:300]}")
         data = resp.json()

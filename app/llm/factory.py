@@ -1,4 +1,4 @@
-"""Swap providers with one config value (LLM_PROVIDER=gemini|groq)."""
+"""Swap providers with one config value (LLM_PROVIDER=gemini|groq|ollama)."""
 from __future__ import annotations
 
 from app.config import Settings, get_settings
@@ -13,4 +13,7 @@ def get_provider(settings: Settings | None = None) -> LLMProvider:
     if s.llm_provider == "groq":
         from app.llm.groq import GroqProvider
         return GroqProvider(s.groq_api_key, s.groq_model)
-    raise LLMError(f"Unknown LLM_PROVIDER: {s.llm_provider!r} (expected 'gemini' or 'groq')")
+    if s.llm_provider == "ollama":
+        from app.llm.ollama import OllamaProvider
+        return OllamaProvider(s.ollama_model, s.ollama_host)
+    raise LLMError(f"Unknown LLM_PROVIDER: {s.llm_provider!r} (expected 'gemini', 'groq' or 'ollama')")

@@ -3,16 +3,25 @@
 # "top customers" (how many?), "recently", "large order", "high value", "loyal", "top product"
 # (by what?), "growth" (over which period?).
 
+# short_circuit (optional, per term) lets a question skip the LLM ambiguity check entirely:
+#   self_contained  the definition fixes the meaning with no period/threshold needed
+#   needs_period    only if the question also names a period (last month, this month, ...)
+# Generic nouns (customer, order, region, category) deliberately have none: their presence says
+# nothing about whether the rest of the question is clear.
 terms:
   revenue:
+    short_circuit: needs_period
     definition: >
       Sales revenue = SUM(fact_sales.net_usd_cents) for lines whose order status has is_completed = TRUE
       (paid/shipped/delivered), in USD, after discounts and BEFORE refunds. Cancelled and pending never count.
   net revenue:
+    short_circuit: needs_period
     definition: revenue minus SUM(fact_refunds.amount_usd_cents) for the same period.
   gross revenue:
+    short_circuit: needs_period
     definition: SUM(fact_sales.gross_cents converted to USD) before discounts for completed orders.
   cash collected:
+    short_circuit: needs_period
     definition: SUM(fact_payments.amount_usd_cents) WHERE payment_status = 'succeeded' (by payment date).
   order:
     definition: A distinct order_id in fact_sales. A "completed order" has is_completed = TRUE.
@@ -21,26 +30,37 @@ terms:
   customer:
     definition: A dim_customer row with is_test_account = FALSE.
   new customer:
+    short_circuit: needs_period
     definition: A customer whose signup date (signup_date_key) falls in the period. Test accounts excluded.
   signed up:
+    short_circuit: needs_period
     definition: Same as new customer.
   active customer:
+    short_circuit: self_contained
     definition: A customer with at least 1 completed order in the last 90 days.
   paying customer:
+    short_circuit: self_contained
     definition: A customer with at least 1 succeeded payment in fact_payments.
   average order value:
+    short_circuit: needs_period
     definition: Revenue divided by the number of distinct completed orders, in USD.
   aov:
+    short_circuit: needs_period
     definition: Same as average order value.
   discount rate:
+    short_circuit: needs_period
     definition: SUM(discount_cents) divided by SUM(gross_cents) over completed orders.
   refund rate:
+    short_circuit: needs_period
     definition: Refunded USD cents divided by succeeded payment USD cents.
   mrr:
+    short_circuit: needs_period
     definition: SUM(fact_mrr_monthly.mrr_cents) for a month (USD). "Current MRR" = the current month.
   churned subscriber:
+    short_circuit: self_contained
     definition: A fact_subscriptions row with subscription_status = 'cancelled'.
   active subscriber:
+    short_circuit: self_contained
     definition: A fact_subscriptions row with subscription_status = 'active'.
   category:
     definition: dim_category, reached via dim_product -> dim_subcategory -> dim_category.

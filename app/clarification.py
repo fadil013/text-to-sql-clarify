@@ -13,13 +13,14 @@ from functools import lru_cache
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.llm.provider import LLMProvider
 
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 MAX_CLARIFICATION_ROUNDS = 2
+AMBIGUITY_PROMPT_VERSION = "1"  # prompts/ambiguity_analysis_v{N}.txt; Phase 7 freezes the winner
 
 
 # ---------------------------------------------------------------- structured outputs
@@ -33,11 +34,23 @@ class AmbiguityAnalysis(BaseModel):
     reasoning: str = ""
     refusal_reason: str = Field(default="", description="set only when status=out_of_scope")
 
+    @field_validator("ambiguity_type", "reasoning", "refusal_reason", mode="before")
+    @classmethod
+    def _none_to_empty(cls, v):
+        """Models often emit null for "nothing to say"; that must not fail validation."""
+        return "" if v is None else v
+
+    @field_validator("interpretations", mode="before")
+    @classmethod
+    def _none_to_list(cls, v):
+        return [] if v is None else v
+
 
 class ClarificationRequest(BaseModel):
     question: str
     options: list[str] = Field(description="2-4 concrete, tappable options")
     allow_free_text: bool = True
+    ambiguity_type: str = Field(default="", description="metric|time|entity|scope|missing_param|vague_term")
 
 
 # ---------------------------------------------------------------- glossary short-circuit
@@ -49,9 +62,24 @@ def _load_glossary() -> dict:
 
 
 @lru_cache
-def _glossary_terms() -> frozenset[str]:
-    return frozenset(t.lower() for t in _load_glossary()["terms"])
+def _short_circuit_terms() -> dict[str, re.Pattern]:
+    """{kind: one compiled regex} over the glossary terms that opted in to short-circuiting."""
+    by_kind: dict[str, list[str]] = {"self_contained": [], "needs_period": []}
+    for term, spec in _load_glossary()["terms"].items():
+        kind = spec.get("short_circuit")
+        if kind in by_kind:
+            by_kind[kind].append(re.escape(term.lower()))
+    return {k: re.compile(r"\b(?:" + "|".join(v) + r")s?\b") for k, v in by_kind.items() if v}
 
+
+_PERIOD = re.compile(r"\b(last month|this month|last week|last \d+ days|year to date|ytd|current month)\b")
+
+# Anything that smells like an attack or a PII probe must reach the LLM check (which refuses it),
+# never be waved through by a glossary hit.
+_ATTACK_MARKERS = re.compile(
+    r"ignore|disregard|instruction|system prompt|developer mode|jailbreak|;|--|\bselect\b|\bdrop\b|"
+    r"\bdelete\b|\bgrant\b|\binsert\b|\bupdate\b|\btruncate\b|password|email|phone|card number|"
+    r"\bpublic\b|schema|pg_", re.I)
 
 # Deliberately-undefined terms that MUST still trigger clarification even though they sound like
 # they could be glossary hits (guards against a future glossary edit accidentally "fixing" one of
@@ -64,17 +92,21 @@ _ALWAYS_AMBIGUOUS_PHRASES = (
 
 
 def glossary_covers(question: str) -> bool:
-    """True only when the question's business terms are ALL in the glossary AND it doesn't
-    contain one of the phrases we deliberately left undefined. A cheap, free, instant check that
-    saves an LLM call on the common case -- most questions are not ambiguous."""
+    """True only when the question is fully pinned down by the glossary, so the LLM ambiguity
+    check (one call) can be skipped. Deliberately narrow -- a missed short-circuit costs one cheap
+    call, a wrong one skips the only gate-level refusal/ambiguity check:
+      * a `self_contained` term (e.g. "active customer") counts on its own;
+      * a `needs_period` term (e.g. "revenue") counts only with a named period ("last month");
+      * generic nouns (customer, order, region) never count;
+      * undefined-on-purpose phrases and attack/PII markers always force the LLM check.
+    """
     q = question.lower()
-    if any(phrase in q for phrase in _ALWAYS_AMBIGUOUS_PHRASES):
+    if any(phrase in q for phrase in _ALWAYS_AMBIGUOUS_PHRASES) or _ATTACK_MARKERS.search(q):
         return False
-    terms_in_question = [t for t in _glossary_terms() if t in q]
-    # If the question doesn't use ANY glossary term, it's not "covered" by the glossary --
-    # it might still be perfectly clear (e.g. "how many products are active"), just not because
-    # of a glossary hit. Only short-circuit when we recognize specific defined vocabulary.
-    return bool(terms_in_question)
+    terms = _short_circuit_terms()
+    if "self_contained" in terms and terms["self_contained"].search(q):
+        return True
+    return bool("needs_period" in terms and terms["needs_period"].search(q) and _PERIOD.search(q))
 
 
 # ---------------------------------------------------------------- prompt
@@ -82,7 +114,7 @@ def glossary_covers(question: str) -> bool:
 
 def ambiguity_analysis_system_prompt() -> str:
     from app.prompts import _compact_glossary, _compact_schema_docs  # reuse Phase 2's compact renderer
-    template = (PROMPTS_DIR / "ambiguity_analysis_v1.txt").read_text(encoding="utf-8")
+    template = (PROMPTS_DIR / f"ambiguity_analysis_v{AMBIGUITY_PROMPT_VERSION}.txt").read_text(encoding="utf-8")
     return template.format(schema_docs=_compact_schema_docs(), glossary=_compact_glossary())
 
 
@@ -161,6 +193,7 @@ def decide(question: str, provider: LLMProvider, memory: SessionMemory | None = 
         question=_clarification_question_text(analysis),
         options=options,
         allow_free_text=True,
+        ambiguity_type=analysis.ambiguity_type,
     )
     return Decision(kind="clarify", clarification=clarification)
 

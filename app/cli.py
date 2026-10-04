@@ -47,8 +47,7 @@ def run_interactive(question: str, provider: LLMProvider | None = None, settings
         if not choice:
             out("No answer given; stopping.")
             return 1
-        ambiguity_type = _last_ambiguity_type(memory, c.question)
-        result = continue_after_clarification(question, ambiguity_type, choice,
+        result = continue_after_clarification(question, c.ambiguity_type, choice,
                                               provider=provider, settings=settings, memory=memory)
 
     if result.kind == "answer":
@@ -56,15 +55,6 @@ def run_interactive(question: str, provider: LLMProvider | None = None, settings
         return 0
     out(f"{'Refused' if result.kind == 'refuse' else 'Error'}: {result.refusal_reason or result.error_message}")
     return 1
-
-
-def _last_ambiguity_type(memory: SessionMemory, question_text: str) -> str:
-    reverse = {
-        "Which metric should I use?": "metric", "Which time range did you mean?": "time",
-        "Which definition did you mean?": "entity", "Can you narrow the scope?": "scope",
-        "Can you give me a bit more detail?": "missing_param", "Can you clarify what you mean?": "vague_term",
-    }
-    return reverse.get(question_text, "vague_term")
 
 
 def main() -> int:
