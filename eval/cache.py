@@ -27,15 +27,22 @@ class CachingProvider(LLMProvider):
         self._inner = inner
         self._dir = cache_dir
         self._dir.mkdir(parents=True, exist_ok=True)
+        self.hits = 0
+        self.misses = 0
 
     def _key(self, kind: str, system: str, user: str, extra: str) -> Path:
-        h = hashlib.sha256(f"{kind}|{self._inner.name}|{extra}|{system}|{user}".encode()).hexdigest()
+        # the model is part of the key: swapping GROQ_MODEL/GEMINI_MODEL must never serve another
+        # model's cached answers (that would silently corrupt a model benchmark)
+        model = getattr(self._inner, "_model", "")
+        h = hashlib.sha256(f"{kind}|{self._inner.name}|{model}|{extra}|{system}|{user}".encode()).hexdigest()
         return self._dir / f"{h}.json"
 
     def generate_structured(self, system: str, user: str, schema: type[T], *, temperature: float = 0.0) -> T:
         path = self._key("structured", system, user, schema.__name__)
         if path.exists():
+            self.hits += 1
             return schema.model_validate_json(path.read_text(encoding="utf-8"))
+        self.misses += 1
         result = self._inner.generate_structured(system, user, schema, temperature=temperature)
         path.write_text(result.model_dump_json(), encoding="utf-8")
         return result
@@ -43,7 +50,9 @@ class CachingProvider(LLMProvider):
     def generate_text(self, system: str, user: str, *, temperature: float = 0.2) -> str:
         path = self._key("text", system, user, "")
         if path.exists():
+            self.hits += 1
             return json.loads(path.read_text(encoding="utf-8"))["text"]
+        self.misses += 1
         text = self._inner.generate_text(system, user, temperature=temperature)
         path.write_text(json.dumps({"text": text}), encoding="utf-8")
         return text

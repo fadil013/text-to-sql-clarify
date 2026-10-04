@@ -146,7 +146,7 @@ def run(provider_name: str | None = None, use_cache: bool = True) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--provider", choices=["gemini", "groq"], default=None)
+    parser.add_argument("--provider", choices=["gemini", "groq", "ollama"], default=None)
     parser.add_argument("--no-cache", action="store_true")
     args = parser.parse_args()
     report = run(args.provider, use_cache=not args.no_cache)

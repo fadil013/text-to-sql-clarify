@@ -36,7 +36,7 @@ class _ScriptedProvider(LLMProvider):
 
 def test_ask_answers_directly_on_glossary_hit():
     provider = _ScriptedProvider(sql="SELECT COUNT(*) AS n FROM dw.dim_customer WHERE is_test_account = FALSE")
-    result = ask("How many customers do we have, excluding test accounts?",
+    result = ask("How many active customers do we have?",
                  provider=provider, settings=get_settings())
     assert result.kind == "answer"
     assert result.answer is not None
@@ -75,8 +75,9 @@ def test_continue_after_clarification_produces_marked_answer():
 
 def test_ask_rejects_unsafe_generated_sql_via_validator():
     """Confirms Phase 4's validator still runs inside the ask() path, not just the old pipeline."""
-    provider = _ScriptedProvider(sql="SELECT * FROM public.customers")
-    result = ask("some clear-sounding question using revenue", provider=provider, settings=get_settings())
+    provider = _ScriptedProvider(analysis=AmbiguityAnalysis(status="clear", confidence=0.95),
+                                 sql="SELECT * FROM public.customers")
+    result = ask("some clear-sounding question", provider=provider, settings=get_settings())
     # Phase 6: a blocked query is surfaced as a clean refusal, not an exception, and never executed
     assert result.kind == "refuse"
     assert result.answer is None
