@@ -1,0 +1,252 @@
+{
+  "timestamp": "2026-10-04T10:48:54.756227+00:00",
+  "provider": "groq",
+  "model": "openai/gpt-oss-20b",
+  "cached": true,
+  "phase": "6 (self-repair)",
+  "max_repairs": 2,
+  "metrics": {
+    "n_fault_cases": 24,
+    "n_scored": 24,
+    "n_llm_errors": 0,
+    "repair_success_rate": 1.0,
+    "repaired_but_wrong": 0,
+    "avg_repairs_used": 1.0,
+    "by_fault": {
+      "unknown_table": {
+        "n": 10,
+        "correct": 10
+      },
+      "syntax_error": {
+        "n": 6,
+        "correct": 6
+      },
+      "wrong_key_column": {
+        "n": 7,
+        "correct": 7
+      },
+      "hallucinated_column": {
+        "n": 1,
+        "correct": 1
+      }
+    }
+  },
+  "results": [
+    {
+      "case_id": "clear_product_count",
+      "fault": "unknown_table",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 0.05,
+      "broken_sql": "SELECT COUNT(*) AS n FROM dw.dim_products",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_active_products",
+      "fault": "unknown_table",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 0.06,
+      "broken_sql": "SELECT COUNT(*) AS n FROM dw.dim_products WHERE is_active = TRUE",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_category_count",
+      "fault": "unknown_table",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 0.05,
+      "broken_sql": "SELECT COUNT(*) AS n FROM dw.dim_categorys",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_new_customers_last_month",
+      "fault": "syntax_error",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 0.06,
+      "broken_sql": "SELECT COUNT(* AS n FROM dw.dim_customer c JOIN dw.dim_date d\n        ON c.signup_date_key = d.date_key WHERE c.is_test_account = FALSE\n        AND d.full_date >= date_trunc('month', current_date) - interval '1 month'\n        AND d.full_date < date_trunc('month', current_date)",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_total_customers",
+      "fault": "unknown_table",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 0.05,
+      "broken_sql": "SELECT COUNT(*) AS n FROM dw.dim_customers WHERE is_test_account = FALSE",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_revenue_last_month",
+      "fault": "wrong_key_column",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 0.08,
+      "broken_sql": "SELECT ROUND(SUM(f.net_usd_cents) / 100.0, 2) AS revenue_usd\n        FROM dw.fact_sales f JOIN dw.dim_order_status s ON f.order_status_id = s.order_status_key\n        JOIN dw.dim_date d ON f.date_key = d.date_key\n        JOIN dw.dim_customer c ON f.customer_key = c.customer_key\n        WHERE s.is_completed = TRUE AND c.is_test_account = FALSE\n        AND d.full_date >= date_trunc('month', current_date) - interval '1 month'\n        AND d.full_date < date_trunc('month', current_date)",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_cancelled_orders_count",
+      "fault": "unknown_table",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 0.06,
+      "broken_sql": "SELECT COUNT(DISTINCT f.order_id) AS n FROM dw.fact_sales f\n        JOIN dw.dim_order_statuss s ON f.order_status_key = s.order_status_key\n        JOIN dw.dim_customer c ON f.customer_key = c.customer_key\n        WHERE s.is_cancelled = TRUE AND c.is_test_account = FALSE",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_orders_by_channel",
+      "fault": "syntax_error",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 0.08,
+      "broken_sql": "SELECT COUNT(DISTINCT f.order_id AS n FROM dw.fact_sales f\n        JOIN dw.dim_channel ch ON f.channel_key = ch.channel_key\n        JOIN dw.dim_customer c ON f.customer_key = c.customer_key\n        WHERE ch.channel_name = 'mobile_app' AND c.is_test_account = FALSE",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_active_subscribers",
+      "fault": "wrong_key_column",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 1.05,
+      "broken_sql": "SELECT COUNT(*) AS n FROM dw.fact_subscriptions f\n        JOIN dw.dim_customer c ON f.customer_id = c.customer_key\n        WHERE f.subscription_status = 'active' AND c.is_test_account = FALSE",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_churned_subscribers",
+      "fault": "wrong_key_column",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 6.75,
+      "broken_sql": "SELECT COUNT(*) AS n FROM dw.fact_subscriptions f\n        JOIN dw.dim_customer c ON f.customer_id = c.customer_key\n        WHERE f.subscription_status = 'cancelled' AND c.is_test_account = FALSE",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_enterprise_plan_active",
+      "fault": "unknown_table",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 0.06,
+      "broken_sql": "SELECT COUNT(*) AS n FROM dw.fact_subscriptions f\n        JOIN dw.dim_plans p ON f.plan_key = p.plan_key\n        JOIN dw.dim_customer c ON f.customer_key = c.customer_key\n        WHERE p.plan_name = 'enterprise' AND f.subscription_status = 'active' AND c.is_test_account = FALSE",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_refund_count",
+      "fault": "syntax_error",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 16.98,
+      "broken_sql": "SELECT COUNT(* AS n FROM dw.fact_refunds f\n        JOIN dw.dim_customer c ON f.customer_key = c.customer_key\n        WHERE TRUE AND c.is_test_account = FALSE",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_total_refunded_usd",
+      "fault": "hallucinated_column",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 6.17,
+      "broken_sql": "SELECT ROUND(SUM(r.amount_usd) / 100.0, 2) AS refunded_usd\n        FROM dw.fact_refunds r JOIN dw.dim_customer c ON r.customer_key = c.customer_key\n        WHERE c.is_test_account = FALSE",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_electronics_product_count",
+      "fault": "wrong_key_column",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 0.06,
+      "broken_sql": "SELECT COUNT(*) AS n FROM dw.dim_product p\n        JOIN dw.dim_subcategory sc ON p.subcategory_id = sc.subcategory_key\n        JOIN dw.dim_category cat ON sc.category_key = cat.category_key\n        WHERE cat.category_name = 'Electronics'",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_us_customer_count",
+      "fault": "unknown_table",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 0.08,
+      "broken_sql": "SELECT COUNT(*) AS n FROM dw.dim_customers c\n        JOIN dw.dim_geography g ON c.geography_key = g.geography_key\n        WHERE g.country_code = 'US' AND c.is_test_account = FALSE",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_succeeded_payments_count",
+      "fault": "syntax_error",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 5.88,
+      "broken_sql": "SELECT COUNT(* AS n FROM dw.fact_payments f\n        JOIN dw.dim_customer c ON f.customer_key = c.customer_key\n        WHERE f.payment_status = 'succeeded' AND c.is_test_account = FALSE",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_failed_payments_count",
+      "fault": "wrong_key_column",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 17.94,
+      "broken_sql": "SELECT COUNT(*) AS n FROM dw.fact_payments f\n        JOIN dw.dim_customer c ON f.customer_id = c.customer_key\n        WHERE f.payment_status = 'failed' AND c.is_test_account = FALSE",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_discounted_lines_count",
+      "fault": "wrong_key_column",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 5.67,
+      "broken_sql": "SELECT COUNT(*) AS n FROM dw.fact_sales f\n        JOIN dw.dim_customer c ON f.customer_id = c.customer_key\n        WHERE f.discount_cents > 0 AND c.is_test_account = FALSE",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_distinct_brands",
+      "fault": "unknown_table",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 0.08,
+      "broken_sql": "SELECT COUNT(*) AS n FROM dw.dim_brands",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_test_accounts_count",
+      "fault": "syntax_error",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 0.03,
+      "broken_sql": "SELECT COUNT(* AS n FROM dw.dim_customer WHERE is_test_account = TRUE",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_card_payment_count",
+      "fault": "wrong_key_column",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 0.06,
+      "broken_sql": "SELECT COUNT(*) AS n FROM dw.fact_payments f\n        JOIN dw.dim_payment_method m ON f.method_id = m.method_key\n        JOIN dw.dim_customer c ON f.customer_key = c.customer_key\n        WHERE m.method_name = 'card' AND c.is_test_account = FALSE",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_regions_defined",
+      "fault": "unknown_table",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 0.05,
+      "broken_sql": "SELECT COUNT(*) AS n FROM dw.dim_regions",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_pro_plan_price",
+      "fault": "unknown_table",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 0.03,
+      "broken_sql": "SELECT list_monthly_price_cents / 100.0 AS price_usd FROM dw.dim_plans WHERE plan_name = 'pro'",
+      "detail": ""
+    },
+    {
+      "case_id": "clear_subcategory_count",
+      "fault": "syntax_error",
+      "status": "repaired_correct",
+      "repairs_used": 1,
+      "latency_s": 0.03,
+      "broken_sql": "SELECT COUNT(* AS n FROM dw.dim_subcategory",
+      "detail": ""
+    }
+  ]
+}

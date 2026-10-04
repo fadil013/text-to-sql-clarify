@@ -74,10 +74,14 @@ CASES: list[Case] = [
         WHERE ch.channel_name = 'mobile_app' AND c.is_test_account = FALSE"""},
     {"id": "clear_active_subscribers", "category": "clear",
      "question": "How many active subscribers do we have?",
-     "gold_sql": "SELECT COUNT(*) AS n FROM dw.fact_subscriptions WHERE subscription_status = 'active'"},
+     "gold_sql": """SELECT COUNT(*) AS n FROM dw.fact_subscriptions f
+        JOIN dw.dim_customer c ON f.customer_key = c.customer_key
+        WHERE f.subscription_status = 'active' AND c.is_test_account = FALSE"""},
     {"id": "clear_churned_subscribers", "category": "clear",
      "question": "How many subscribers have churned?",
-     "gold_sql": "SELECT COUNT(*) AS n FROM dw.fact_subscriptions WHERE subscription_status = 'cancelled'"},
+     "gold_sql": """SELECT COUNT(*) AS n FROM dw.fact_subscriptions f
+        JOIN dw.dim_customer c ON f.customer_key = c.customer_key
+        WHERE f.subscription_status = 'cancelled' AND c.is_test_account = FALSE"""},
     {"id": "clear_enterprise_plan_active", "category": "clear",
      "question": "How many customers currently have an active enterprise subscription?",
      "gold_sql": """SELECT COUNT(*) AS n FROM dw.fact_subscriptions f
@@ -86,15 +90,20 @@ CASES: list[Case] = [
         WHERE p.plan_name = 'enterprise' AND f.subscription_status = 'active' AND c.is_test_account = FALSE"""},
     {"id": "clear_refund_count", "category": "clear",
      "question": "How many refunds have been issued in total?",
-     "gold_sql": "SELECT COUNT(*) AS n FROM dw.fact_refunds"},
+     "gold_sql": """SELECT COUNT(*) AS n FROM dw.fact_refunds f
+        JOIN dw.dim_customer c ON f.customer_key = c.customer_key
+        WHERE TRUE AND c.is_test_account = FALSE"""},
     {"id": "clear_total_refunded_usd", "category": "clear",
      "question": "How much money have we refunded in total, in USD?",
-     "gold_sql": "SELECT ROUND(SUM(amount_usd_cents) / 100.0, 2) AS refunded_usd FROM dw.fact_refunds"},
-    {"id": "clear_electronics_product_count", "category": "clear",
-     "question": "How many products are in the Electronics category?",
      "gold_sql": """SELECT ROUND(SUM(r.amount_usd_cents) / 100.0, 2) AS refunded_usd
         FROM dw.fact_refunds r JOIN dw.dim_customer c ON r.customer_key = c.customer_key
         WHERE c.is_test_account = FALSE"""},
+    {"id": "clear_electronics_product_count", "category": "clear",
+     "question": "How many products are in the Electronics category?",
+     "gold_sql": """SELECT COUNT(*) AS n FROM dw.dim_product p
+        JOIN dw.dim_subcategory sc ON p.subcategory_key = sc.subcategory_key
+        JOIN dw.dim_category cat ON sc.category_key = cat.category_key
+        WHERE cat.category_name = 'Electronics'"""},
     {"id": "clear_us_customer_count", "category": "clear",
      "question": "How many non-test customers are from the United States?",
      "gold_sql": """SELECT COUNT(*) AS n FROM dw.dim_customer c
@@ -102,13 +111,19 @@ CASES: list[Case] = [
         WHERE g.country_code = 'US' AND c.is_test_account = FALSE"""},
     {"id": "clear_succeeded_payments_count", "category": "clear",
      "question": "How many successful payments have we processed?",
-     "gold_sql": "SELECT COUNT(*) AS n FROM dw.fact_payments WHERE payment_status = 'succeeded'"},
+     "gold_sql": """SELECT COUNT(*) AS n FROM dw.fact_payments f
+        JOIN dw.dim_customer c ON f.customer_key = c.customer_key
+        WHERE f.payment_status = 'succeeded' AND c.is_test_account = FALSE"""},
     {"id": "clear_failed_payments_count", "category": "clear",
      "question": "How many failed payments were there?",
-     "gold_sql": "SELECT COUNT(*) AS n FROM dw.fact_payments WHERE payment_status = 'failed'"},
+     "gold_sql": """SELECT COUNT(*) AS n FROM dw.fact_payments f
+        JOIN dw.dim_customer c ON f.customer_key = c.customer_key
+        WHERE f.payment_status = 'failed' AND c.is_test_account = FALSE"""},
     {"id": "clear_discounted_lines_count", "category": "clear",
      "question": "How many order lines had a discount applied?",
-     "gold_sql": "SELECT COUNT(*) AS n FROM dw.fact_sales WHERE discount_cents > 0"},
+     "gold_sql": """SELECT COUNT(*) AS n FROM dw.fact_sales f
+        JOIN dw.dim_customer c ON f.customer_key = c.customer_key
+        WHERE f.discount_cents > 0 AND c.is_test_account = FALSE"""},
     {"id": "clear_distinct_brands", "category": "clear",
      "question": "How many distinct brands do we sell?",
      "gold_sql": "SELECT COUNT(*) AS n FROM dw.dim_brand"},

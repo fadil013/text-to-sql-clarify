@@ -25,3 +25,10 @@ def test_rate_handles_empty():
 def test_unsafe_keywords_cover_common_attacks():
     for kw in ("DROP", "DELETE", "UPDATE", "INSERT", "GRANT", "ALTER", "TRUNCATE", "CREATE"):
         assert any(kw in u for u in UNSAFE_KEYWORDS)
+
+
+def test_normalize_rows_treats_equal_decimals_with_different_scale_as_equal():
+    from decimal import Decimal
+    assert _normalize_rows([{"x": Decimal("37597.15")}]) == _normalize_rows([{"x": Decimal("37597.150000000000")}])
+    assert _normalize_rows([{"x": Decimal("1.50")}]) != _normalize_rows([{"x": Decimal("1.51")}])
+    assert _normalize_rows([{"x": 100}]) == _normalize_rows([{"x": 100}])
