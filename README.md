@@ -69,8 +69,8 @@ flowchart TD
   one retry on invalid output. Nothing is parsed from free text.
 - **Self-repair** (`app/repair.py`): mechanical failures (unknown column, syntax error, timeout) are
   fed back to the model, at most twice. Every repaired query is validated again.
-- **Provider abstraction** (`app/llm/`): Gemini, Groq and Ollama behind one interface, switched with
-  `LLM_PROVIDER`. Free tiers and local models only.
+- **Provider-agnostic LLM layer** (`app/llm/`): hosted APIs and local models sit behind one interface,
+  so changing the model is a one-line config change (`LLM_PROVIDER`).
 
 ## Safety design
 
@@ -117,14 +117,14 @@ All numbers come from the reports in `eval/reports/`. The golden set has 60 labe
 |---|---|
 | Validator: adversarial raw-SQL payloads blocked (unit suite) | 36 / 36 |
 | Validator: gold queries passing unchanged | 24 / 24 |
-| Self-repair on injected faults (Groq `gpt-oss-20b`) | 24 / 24 repaired to the correct result |
+| Self-repair on injected faults (OpenAI `gpt-oss-20b`) | 24 / 24 repaired to the correct result |
 | Gate: clear questions allowed through | 21 / 24 (87.5%) |
 | Gate: ambiguous questions that triggered a clarification (recall) | 9 / 16 (56%) |
 | Gate: clarification precision | 9 / 12 (75%) |
 | Gate: out-of-scope questions refused | 8 / 8 |
 | Gate: adversarial prompts stopped at the gate alone | 6 / 12 (50%) |
 
-Gate numbers are for ambiguity prompt v1 on Groq `gpt-oss-20b`; one of the 60 calls failed.
+Gate numbers are for ambiguity prompt v1 on OpenAI's open-weight `gpt-oss-20b`; one of the 60 calls failed.
 
 **How to read these**
 
@@ -152,14 +152,15 @@ Building the eval before tuning surfaced problems that would otherwise have gone
 | Data accuracy | The model returned integer cents as dollars, inflating revenue by 100x. |
 | SQL security | Column qualification alone did not reject cross-schema access (`SELECT * FROM public.customers`), and the function blocklist missed `pg_sleep`. Both were caught by the adversarial tests. |
 | Self-repair safety | A probe for an `email` column surfaced as an "unknown column" error, so a PII access attempt was classified as a recoverable SQL error. |
-| Inference limits | Free-tier token-per-minute caps failed 36 of 60 calls in one evaluation run. |
+| Inference limits | Provider token-per-minute rate limits failed 36 of 60 calls in one evaluation run. |
 | Ambiguity detection | 56% clarification recall on ambiguous questions, and the gate alone stopped 50% of adversarial prompts. This is the main open problem. |
 
 The first four are fixed in the code and pinned by tests. The last two are open.
 
 ## Quickstart
 
-Requires Python 3.11+, Docker, and either a free Gemini or Groq API key or a local Ollama model.
+Requires Python 3.11+, Docker, and access to an LLM: an API key for a hosted model or a model
+running locally. Supported providers are listed in `.env.example`.
 
 ```bash
 git clone https://github.com/fadil013/text-to-sql-clarify.git
@@ -187,9 +188,9 @@ pytest                                                                  # DB tes
 Evaluation:
 
 ```bash
-python -m eval.gate_eval --provider groq      # clarification decisions only
-python -m eval.repair_eval --provider groq    # self-repair on injected faults
-python -m eval.ablation --provider groq       # with vs without clarification
+python -m eval.gate_eval --provider <name>     # clarification decisions only
+python -m eval.repair_eval --provider <name>   # self-repair on injected faults
+python -m eval.ablation --provider <name>      # with vs without clarification
 ```
 
 To rebuild the database from scratch: `docker compose down -v`, then `docker compose up -d` and
@@ -223,7 +224,10 @@ tests/      unit, validator, adversarial, integration
 - The sensitive-name check is a substring match, so it can reject a legitimate column. It fails
   closed.
 - Session memory is in-process only and is lost on restart.
-- Free-tier rate limits make full evaluation runs slow and occasionally incomplete.
-- Released under the MIT License (see `LICENSE`).
+- Provider rate limits make full evaluation runs slow and occasionally incomplete.
 - No LLM system can promise zero wrong answers. The goal here is that wrong answers are blocked or
   turned into questions, and that this is shown with numbers.
+
+## License
+
+MIT. See `LICENSE`.
