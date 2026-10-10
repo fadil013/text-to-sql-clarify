@@ -2,7 +2,6 @@
 Needs the real DB (read-only role); uses a stub LLM so no API key/network call is needed.
 """
 import pytest
-from pydantic import BaseModel
 
 from app.clarification import AmbiguityAnalysis, SessionMemory
 from app.config import get_settings

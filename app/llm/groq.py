@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from app.llm.json_mode import parse_structured, schema_instructions
 from app.llm.provider import LLMError, LLMProvider, T
-from app.llm.rate_limit import RateLimiter, estimate_tokens, retry_after_seconds, TokenWindowLimiter
+from app.llm.rate_limit import RateLimiter, TokenWindowLimiter, estimate_tokens, retry_after_seconds
 
 _URL = "https://api.groq.com/openai/v1/chat/completions"
 _RETRY_STATUSES = {429, 503}

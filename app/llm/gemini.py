@@ -5,11 +5,11 @@ import json
 import time
 
 import httpx
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from app.llm.json_mode import parse_structured, schema_instructions
 from app.llm.provider import LLMError, LLMProvider, T
-from app.llm.rate_limit import RateLimiter, estimate_tokens, retry_after_seconds
+from app.llm.rate_limit import RateLimiter, retry_after_seconds
 
 _BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 _RETRY_STATUSES = {429, 503}

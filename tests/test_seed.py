@@ -1,11 +1,11 @@
 """Unit tests for the seed generator (no database needed)."""
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from db.seed import generate_dataset
 
-ANCHOR = datetime(2026, 9, 29, tzinfo=timezone.utc)
+ANCHOR = datetime(2026, 9, 29, tzinfo=UTC)
 
 
 @pytest.fixture(scope="module")

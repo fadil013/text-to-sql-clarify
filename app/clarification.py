@@ -79,7 +79,7 @@ _PERIOD = re.compile(r"\b(last month|this month|last week|last \d+ days|year to 
 _ATTACK_MARKERS = re.compile(
     r"ignore|disregard|instruction|system prompt|developer mode|jailbreak|;|--|\bselect\b|\bdrop\b|"
     r"\bdelete\b|\bgrant\b|\binsert\b|\bupdate\b|\btruncate\b|password|email|phone|card number|"
-    r"\bpublic\b|schema|pg_", re.I)
+    r"\bpublic\b|schema|pg_", re.IGNORECASE)
 
 # Deliberately-undefined terms that MUST still trigger clarification even though they sound like
 # they could be glossary hits (guards against a future glossary edit accidentally "fixing" one of
@@ -113,7 +113,10 @@ def glossary_covers(question: str) -> bool:
 
 
 def ambiguity_analysis_system_prompt() -> str:
-    from app.prompts import _compact_glossary, _compact_schema_docs  # reuse Phase 2's compact renderer
+    from app.prompts import (  # reuse Phase 2's compact renderer
+        _compact_glossary,
+        _compact_schema_docs,
+    )
     template = (PROMPTS_DIR / f"ambiguity_analysis_v{AMBIGUITY_PROMPT_VERSION}.txt").read_text(encoding="utf-8")
     return template.format(schema_docs=_compact_schema_docs(), glossary=_compact_glossary())
 

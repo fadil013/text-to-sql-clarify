@@ -25,7 +25,7 @@ import json
 import re
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
@@ -130,7 +130,7 @@ def run(provider_name: str | None = None, use_cache: bool = True) -> dict:
         b["n"] += 1
         b["correct"] += r["status"] == "repaired_correct"
     return {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "provider": base.name, "model": getattr(base, "_model", ""), "cached": use_cache,
         "phase": "6 (self-repair)", "max_repairs": settings.max_repairs,
         "metrics": {
@@ -157,7 +157,7 @@ def main() -> int:
     for fault, b in m["by_fault"].items():
         print(f"    {fault:20s} {b['correct']}/{b['n']}")
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     path = REPORTS_DIR / f"phase6_repair_{base_name(report)}_{stamp}.json"
     path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
     print(f"Saved: {path}")

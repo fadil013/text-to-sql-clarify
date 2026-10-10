@@ -17,8 +17,8 @@ def schema_instructions(schema: type[BaseModel]) -> str:
     fields = schema.model_json_schema().get("properties", {})
     lines = [f'  "{name}": {spec.get("type", "any")}' for name, spec in fields.items()]
     return (
-        f"Respond with ONLY a single JSON object (no prose, no markdown fences) matching exactly:\n"
-        f"{{\n" + ",\n".join(lines) + "\n}}"
+        "Respond with ONLY a single JSON object (no prose, no markdown fences) matching exactly:\n"
+        "{\n" + ",\n".join(lines) + "\n}}"
     )
 
 
@@ -32,4 +32,4 @@ def parse_structured(raw: str, schema: type[T]) -> T:
     return schema.model_validate(data)  # raises ValidationError -> caller retries
 
 
-__all__ = ["schema_instructions", "parse_structured", "ValidationError"]
+__all__ = ["ValidationError", "parse_structured", "schema_instructions"]

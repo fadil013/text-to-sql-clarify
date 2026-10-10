@@ -55,7 +55,7 @@ def estimate_tokens(*texts: str, output_allowance: int = 600) -> int:
     return int(sum(len(t) for t in texts) / 3.5) + output_allowance
 
 
-_RETRY_IN = re.compile(r"try again in ([\d.]+)\s*(ms|s)\b", re.I)
+_RETRY_IN = re.compile(r"try again in ([\d.]+)\s*(ms|s)\b", re.IGNORECASE)
 _RETRY_DELAY = re.compile(r'"retryDelay"\s*:\s*"([\d.]+)s"')
 MAX_RETRY_WAIT_S = 75.0
 

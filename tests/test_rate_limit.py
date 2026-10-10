@@ -1,7 +1,12 @@
 """Rate-limit helpers (no network, no real sleeping)."""
 from types import SimpleNamespace
 
-from app.llm.rate_limit import MAX_RETRY_WAIT_S, TokenWindowLimiter, estimate_tokens, retry_after_seconds
+from app.llm.rate_limit import (
+    MAX_RETRY_WAIT_S,
+    TokenWindowLimiter,
+    estimate_tokens,
+    retry_after_seconds,
+)
 
 
 class FakeClock:

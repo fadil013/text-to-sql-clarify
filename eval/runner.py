@@ -15,8 +15,8 @@ import json
 import sys
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from decimal import Decimal
-from datetime import datetime, timezone
 from pathlib import Path
 
 from app.config import get_settings
@@ -80,7 +80,7 @@ def _run_one(case: Case, provider: LLMProvider, settings) -> CaseResult:
     except LLMError as e:
         return CaseResult(case["id"], category, question, "error", str(e),
                            latency_s=time.monotonic() - t0)
-    except Exception as e:  # psycopg errors on hallucinated columns/tables, etc.
+    except Exception as e:  # noqa: BLE001 psycopg errors on hallucinated columns/tables, etc.
         return CaseResult(case["id"], category, question, "error", f"{type(e).__name__}: {e}",
                            latency_s=time.monotonic() - t0)
 
@@ -90,12 +90,12 @@ def _run_one(case: Case, provider: LLMProvider, settings) -> CaseResult:
     if category == "clear":
         try:
             gold_rows = run_sql(case["gold_sql"], settings)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return CaseResult(case["id"], category, question, "error",
                                f"gold_sql itself failed: {e}", result.sql, latency, result.assumptions)
         try:
             actual_rows = run_sql(result.sql, settings)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return CaseResult(case["id"], category, question, "mismatch",
                                f"generated SQL failed to execute: {e}", result.sql, latency, result.assumptions)
         status = "match" if _gold_values_present(gold_rows, actual_rows) else "mismatch"
@@ -149,7 +149,7 @@ def run(provider_name: str | None = None, use_cache: bool = True) -> dict:
     }
 
     report = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "provider": base_provider.name,
         "cached": use_cache,
         "phase": "3 (baseline, no clarification/validator yet)",
@@ -167,7 +167,7 @@ def _rate(results: list[CaseResult], status: str) -> float | None:
 
 def save_report(report: dict) -> Path:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     path = REPORTS_DIR / f"phase3_baseline_{report['provider'].replace('+cache', '')}_{stamp}.json"
     path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
     return path

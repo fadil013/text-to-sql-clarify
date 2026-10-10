@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app import clarification
@@ -75,7 +75,7 @@ def run(provider_name: str, model: str | None, prompt_version: str, use_cache: b
         ok = row["decision"] in EXPECTED[case["category"]]
         print(f"[{i}/{len(CASES)}] {'ok ' if ok else 'MISS'} {case['category']:12s} {case['id']:40s} {row['decision']}",
               flush=True)
-    return {"timestamp": datetime.now(timezone.utc).isoformat(), "provider": base.name,
+    return {"timestamp": datetime.now(UTC).isoformat(), "provider": base.name,
             "model": getattr(base, "_model", ""), "ambiguity_prompt_version": prompt_version,
             "metrics": score(rows), "results": rows}
 
@@ -92,7 +92,7 @@ def main() -> int:
         if r["decision"] not in EXPECTED[r["category"]]:
             print(f"MISS [{r['category']}] {r['id']}: got {r['decision']} {r['ambiguity_type']} | {str(r['detail'])[:110]}")
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     tag = (report["model"] or report["provider"]).replace("/", "_")
     path = REPORTS_DIR / f"phase7_gate_{tag}_v{args.prompt_version}_{stamp}.json"
     path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")

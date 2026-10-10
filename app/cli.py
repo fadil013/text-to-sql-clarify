@@ -6,7 +6,7 @@ Usage:  python -m app.cli "Who was our best customer last month?"
 from __future__ import annotations
 
 import sys
-from typing import Callable
+from collections.abc import Callable
 
 from app.clarification import SessionMemory
 from app.config import Settings
@@ -68,7 +68,7 @@ def main() -> int:
         from app.pipeline import answer_question
         try:
             a = answer_question(question)
-        except Exception as e:  # baseline path raises by design; show it plainly
+        except Exception as e:  # noqa: BLE001 baseline path raises by design; show it plainly
             print(f"Could not answer: {e}")
             return 1
         _print_answer(AskResult(kind="answer", answer=a), print)

@@ -1,12 +1,10 @@
 """Phase 5 clarification engine tests. No network/DB needed -- a stub provider stands in for the
 LLM so the decision-gate LOGIC is tested in isolation from any real model's behavior."""
-import pytest
 
 from app.clarification import (
-    AmbiguityAnalysis,
-    Decision,
-    SessionMemory,
     _ALWAYS_AMBIGUOUS_PHRASES,
+    AmbiguityAnalysis,
+    SessionMemory,
     decide,
     glossary_covers,
     resolve_with_answer,

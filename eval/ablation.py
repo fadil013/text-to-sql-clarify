@@ -31,7 +31,7 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
@@ -50,7 +50,7 @@ from eval.instrumentation import CountingProvider
 from eval.runner import _gold_values_present
 
 REPORTS_DIR = Path(__file__).resolve().parent / "reports"
-_UNSAFE = re.compile(r"\b(DROP|DELETE|UPDATE|INSERT|GRANT|ALTER|TRUNCATE|CREATE|PUBLIC|PG_SLEEP)\b", re.I)
+_UNSAFE = re.compile(r"\b(DROP|DELETE|UPDATE|INSERT|GRANT|ALTER|TRUNCATE|CREATE|PUBLIC|PG_SLEEP)\b", re.IGNORECASE)
 ARMS = ("no_clarification", "clarification")
 
 
@@ -116,7 +116,7 @@ def summarize(rows: list[dict]) -> dict:
     out: dict = {}
     for arm in ARMS:
         clear, amb, oos, adv = (sel(c) for c in ("clear", "ambiguous", "out_of_scope", "adversarial"))
-        a = lambda r: r[arm]  # noqa: E731
+        a = lambda r, arm=arm: r[arm]
         m = {
             "clear_n": len(clear),
             "clear_execution_accuracy": _rate(sum(a(r).get("correct") is True for r in clear), len(clear)),
@@ -179,11 +179,11 @@ def run(provider_name: str, model: str | None, limit: int | None, use_cache: boo
     hits = sum(getattr(c, "hits", 0) for c in (cache_a, cache_b))
     misses = sum(getattr(c, "misses", 0) for c in (cache_a, cache_b))
     try:
-        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
+        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=False).stdout.strip()
     except OSError:
         commit = ""
     return {
-        "timestamp": datetime.now(timezone.utc).isoformat(), "git_commit": commit,
+        "timestamp": datetime.now(UTC).isoformat(), "git_commit": commit,
         "provider": base.name, "model": getattr(base, "_model", ""), "n_cases": len(cases),
         "cache_hit_rate": _rate(hits, hits + misses), "tokens_are_estimates": True,
         "metrics": summarize(rows), "results": rows,
@@ -199,7 +199,7 @@ def main() -> int:
     args = ap.parse_args()
     report = run(args.provider, args.model, args.limit, use_cache=not args.no_cache)
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     tag = re.sub(r"[^A-Za-z0-9._-]", "_", report["model"] or report["provider"])
     path = REPORTS_DIR / f"phase7_ablation_{tag}_{stamp}.json"
     path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")

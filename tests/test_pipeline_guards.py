@@ -3,7 +3,6 @@ Phase 4 validator and propagates its rejection, using a stub provider so no API 
 Exhaustive adversarial coverage lives in tests/test_validator.py; this just checks the wiring.
 """
 import pytest
-from pydantic import BaseModel
 
 from app.config import Settings
 from app.llm.provider import LLMProvider
